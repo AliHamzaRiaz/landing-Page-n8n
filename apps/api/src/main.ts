@@ -16,15 +16,35 @@ async function bootstrap() {
   const prefix = config.get<string>('API_PREFIX', 'api');
   app.setGlobalPrefix(prefix);
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      // Allow browser clients on other origins (Vercel) to read API responses.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
 
   const corsOrigin = config.get<string>(
     'CORS_ORIGIN',
     'http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174',
   );
-  const origins = corsOrigin.split(',').map((o) => o.trim()).filter(Boolean);
+  // Normalize: trim + strip trailing slashes so "https://app.vercel.app/" still matches.
+  const origins = corsOrigin
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
   app.enableCors({
-    origin: origins.length === 1 ? origins[0] : origins,
+    origin: (requestOrigin, callback) => {
+      if (!requestOrigin) {
+        callback(null, true);
+        return;
+      }
+      const normalized = requestOrigin.replace(/\/+$/, '');
+      if (origins.includes(normalized)) {
+        callback(null, normalized);
+        return;
+      }
+      callback(null, false);
+    },
     credentials: true,
   });
 
@@ -40,8 +60,9 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  const port = Number(config.get('API_PORT') ?? process.env.PORT ?? 3001);
-  await app.listen(port);
+  // Prefer platform PORT (Render/Railway); fall back to API_PORT for local.
+  const port = Number(process.env.PORT ?? config.get('API_PORT') ?? 3001);
+  await app.listen(port, '0.0.0.0');
 }
 
 bootstrap();
