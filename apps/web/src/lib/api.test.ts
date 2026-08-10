@@ -37,4 +37,18 @@ describe('getFriendlyErrorMessage', () => {
 
     expect(getFriendlyErrorMessage(error)).toBe('Email is already registered')
   })
+
+  it('shows credential errors instead of session expired on login 401', () => {
+    const error = new AxiosError('Request failed')
+    error.config = { url: '/auth/login', headers: {} } as never
+    error.response = {
+      status: 401,
+      statusText: 'Unauthorized',
+      headers: {},
+      config: { url: '/auth/login', headers: {} } as never,
+      data: { message: 'Invalid phone number or password' },
+    }
+
+    expect(getFriendlyErrorMessage(error)).toBe('Invalid phone number or password')
+  })
 })

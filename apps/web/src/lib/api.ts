@@ -25,10 +25,25 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+const PUBLIC_AUTH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/verify',
+  '/auth/resend-otp',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+]
+
+function isPublicAuthRequest(url?: string): boolean {
+  if (!url) return false
+  return PUBLIC_AUTH_PATHS.some((path) => url.includes(path))
+}
+
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError<{ message?: string | string[]; error?: string }>) => {
-    if (error.response?.status === 401) {
+    // Login/register 401 means bad credentials — not an expired session.
+    if (error.response?.status === 401 && !isPublicAuthRequest(error.config?.url)) {
       authStorage.clear()
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)
@@ -69,7 +84,17 @@ export function getFriendlyErrorMessage(error: unknown, fallback = 'Something we
       (typeof payload?.error === 'string' && payload.error) ||
       error.message
 
-    if (error.response.status === 401) return 'Your session has expired. Please sign in again.'
+    if (error.response.status === 401) {
+      // Prefer API message for login/register (e.g. invalid password).
+      if (isPublicAuthRequest(error.config?.url)) {
+        return sanitizeMessage(String(raw), 'Invalid phone number or password.')
+      }
+      const sessionMsg = sanitizeMessage(String(raw), '')
+      if (sessionMsg && !/^unauthorized$/i.test(sessionMsg)) {
+        return sessionMsg
+      }
+      return 'Your session has expired. Please sign in again.'
+    }
     if (error.response.status === 403) return 'You do not have permission to perform this action.'
     if (error.response.status === 404) return 'The requested resource was not found.'
     if (error.response.status === 429) return 'Too many requests. Please wait a moment and try again.'
