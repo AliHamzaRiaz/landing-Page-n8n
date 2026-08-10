@@ -33,7 +33,10 @@ async function bootstrap() {
     .map((o) => o.trim().replace(/\/+$/, ''))
     .filter(Boolean);
   app.enableCors({
-    origin: (requestOrigin, callback) => {
+    origin: (
+      requestOrigin: string | undefined,
+      callback: (err: Error | null, allow?: boolean | string) => void,
+    ) => {
       if (!requestOrigin) {
         callback(null, true);
         return;
