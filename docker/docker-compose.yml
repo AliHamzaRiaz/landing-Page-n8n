@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ennitant-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ennitant
+      POSTGRES_PASSWORD: ennitant
+      POSTGRES_DB: ennitant
+    ports:
+      - "5432:5432"
+    volumes:
+      - ennitant_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ennitant -d ennitant"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ennitant_pg_data:
