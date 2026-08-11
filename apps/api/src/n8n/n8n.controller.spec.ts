@@ -17,6 +17,7 @@ describe('N8nController S2S auth', () => {
     getOrder: jest.fn(),
     updateStatus: jest.fn(),
     listBusinessOrders: jest.fn(),
+    findByWhatsAppPhoneNumberId: jest.fn(),
   };
   const orderIntake = {
     createFromWhatsApp: jest.fn(),
@@ -178,5 +179,53 @@ describe('N8nController S2S auth', () => {
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(orderIntake.createFromWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it('returns business for valid WhatsApp phone_number_id', async () => {
+    n8nOrders.findByWhatsAppPhoneNumberId.mockResolvedValue({
+      businessId: 'cmsn4guam0000v9w0n3npytin',
+      companyName: 'ABC Garments',
+      whatsappNumber: '+923134996633',
+      phoneNumberId: '123456789',
+    });
+
+    const result = await controller.getBusinessByWhatsAppPhoneId(
+      'secret',
+      '123456789',
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      businessId: 'cmsn4guam0000v9w0n3npytin',
+      companyName: 'ABC Garments',
+      whatsappNumber: '+923134996633',
+      phoneNumberId: '123456789',
+    });
+    expect(n8nOrders.findByWhatsAppPhoneNumberId).toHaveBeenCalledWith(
+      '123456789',
+    );
+  });
+
+  it('rejects by-whatsapp-phone-id lookup with invalid secret', async () => {
+    n8nService.verifyWebhookSecret.mockImplementation(() => {
+      throw new UnauthorizedException('Invalid n8n webhook secret');
+    });
+
+    await expect(
+      controller.getBusinessByWhatsAppPhoneId(undefined, '123456789'),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(n8nOrders.findByWhatsAppPhoneNumberId).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 when WhatsApp phone_number_id is unknown', async () => {
+    n8nOrders.findByWhatsAppPhoneNumberId.mockRejectedValue(
+      new NotFoundException(
+        'Business WhatsApp number is not connected to any business.',
+      ),
+    );
+
+    await expect(
+      controller.getBusinessByWhatsAppPhoneId('secret', 'unknown'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

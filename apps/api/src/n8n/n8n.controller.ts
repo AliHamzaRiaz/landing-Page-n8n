@@ -112,6 +112,22 @@ export class N8nController {
   }
 
   @Public()
+  @Get('businesses/by-whatsapp-phone-id/:phoneNumberId')
+  async getBusinessByWhatsAppPhoneId(
+    @Headers('x-n8n-secret') secret: string | undefined,
+    @Param('phoneNumberId') phoneNumberId: string,
+  ) {
+    this.n8nService.verifyWebhookSecret(secret);
+    const data =
+      await this.n8nOrders.findByWhatsAppPhoneNumberId(phoneNumberId);
+    return {
+      success: true,
+      message: 'OK',
+      data,
+    };
+  }
+
+  @Public()
   @Get('businesses/:businessId/orders')
   async listBusinessOrders(
     @Headers('x-n8n-secret') secret: string | undefined,

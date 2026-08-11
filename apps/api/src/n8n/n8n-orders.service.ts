@@ -129,6 +129,69 @@ export class N8nOrdersService {
     return business;
   }
 
+  /**
+   * Resolve owning business from Meta WhatsApp Cloud API phone_number_id.
+   * Prefers Business.metaPhoneNumberId, then WhatsAppAccount.phoneNumberId.
+   * Never uses the customer WhatsApp `from` number.
+   */
+  async findByWhatsAppPhoneNumberId(phoneNumberId: string) {
+    const id = phoneNumberId?.trim();
+    if (!id) {
+      throw new BadRequestException('phoneNumberId is required');
+    }
+
+    const byMeta = await this.prisma.business.findFirst({
+      where: { metaPhoneNumberId: id },
+      select: {
+        id: true,
+        name: true,
+        companyName: true,
+        whatsappNumber: true,
+        metaPhoneNumberId: true,
+      },
+    });
+
+    if (byMeta) {
+      return {
+        businessId: byMeta.id,
+        companyName: byMeta.companyName || byMeta.name,
+        whatsappNumber: byMeta.whatsappNumber,
+        phoneNumberId: byMeta.metaPhoneNumberId || id,
+      };
+    }
+
+    const account = await this.prisma.whatsAppAccount.findUnique({
+      where: { phoneNumberId: id },
+      select: {
+        phoneNumberId: true,
+        displayPhoneNumber: true,
+        business: {
+          select: {
+            id: true,
+            name: true,
+            companyName: true,
+            whatsappNumber: true,
+            metaPhoneNumberId: true,
+          },
+        },
+      },
+    });
+
+    if (!account?.business) {
+      throw new NotFoundException(
+        'Business WhatsApp number is not connected to any business.',
+      );
+    }
+
+    return {
+      businessId: account.business.id,
+      companyName: account.business.companyName || account.business.name,
+      whatsappNumber:
+        account.business.whatsappNumber || account.displayPhoneNumber || null,
+      phoneNumberId: account.phoneNumberId,
+    };
+  }
+
   async getOrder(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },

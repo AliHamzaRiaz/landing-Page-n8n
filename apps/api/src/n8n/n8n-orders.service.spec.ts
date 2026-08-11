@@ -9,7 +9,8 @@ describe('N8nOrdersService', () => {
   let service: N8nOrdersService;
 
   const prisma = {
-    business: { findUnique: jest.fn() },
+    business: { findUnique: jest.fn(), findFirst: jest.fn() },
+    whatsAppAccount: { findUnique: jest.fn() },
     order: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -193,5 +194,82 @@ describe('N8nOrdersService', () => {
     });
     expect(result.total).toBe(1);
     expect(result.items[0].id).toBe('o1');
+  });
+
+  it('resolves business by metaPhoneNumberId', async () => {
+    prisma.business.findFirst.mockResolvedValue({
+      id: 'cmsn4guam0000v9w0n3npytin',
+      name: 'My Business',
+      companyName: 'ABC Garments',
+      whatsappNumber: '+923134996633',
+      metaPhoneNumberId: '123456789',
+    });
+
+    const result = await service.findByWhatsAppPhoneNumberId('123456789');
+    expect(result).toEqual({
+      businessId: 'cmsn4guam0000v9w0n3npytin',
+      companyName: 'ABC Garments',
+      whatsappNumber: '+923134996633',
+      phoneNumberId: '123456789',
+    });
+    expect(prisma.whatsAppAccount.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('falls back to WhatsAppAccount.phoneNumberId', async () => {
+    prisma.business.findFirst.mockResolvedValue(null);
+    prisma.whatsAppAccount.findUnique.mockResolvedValue({
+      phoneNumberId: '999888777',
+      displayPhoneNumber: '+923001112233',
+      business: {
+        id: 'biz-wa',
+        name: 'Shop',
+        companyName: null,
+        whatsappNumber: '+923001112233',
+        metaPhoneNumberId: null,
+      },
+    });
+
+    const result = await service.findByWhatsAppPhoneNumberId('999888777');
+    expect(result.businessId).toBe('biz-wa');
+    expect(result.companyName).toBe('Shop');
+    expect(result.phoneNumberId).toBe('999888777');
+  });
+
+  it('returns 404 when phone_number_id is unknown', async () => {
+    prisma.business.findFirst.mockResolvedValue(null);
+    prisma.whatsAppAccount.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.findByWhatsAppPhoneNumberId('missing-phone-id'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.findByWhatsAppPhoneNumberId('missing-phone-id'),
+    ).rejects.toThrow(
+      'Business WhatsApp number is not connected to any business.',
+    );
+  });
+
+  it('maps distinct phone_number_ids to distinct businesses', async () => {
+    prisma.business.findFirst
+      .mockResolvedValueOnce({
+        id: 'biz-a',
+        name: 'A',
+        companyName: 'Alpha',
+        whatsappNumber: '+92111',
+        metaPhoneNumberId: 'phone-a',
+      })
+      .mockResolvedValueOnce({
+        id: 'biz-b',
+        name: 'B',
+        companyName: 'Beta',
+        whatsappNumber: '+92222',
+        metaPhoneNumberId: 'phone-b',
+      });
+
+    const a = await service.findByWhatsAppPhoneNumberId('phone-a');
+    const b = await service.findByWhatsAppPhoneNumberId('phone-b');
+    expect(a.businessId).toBe('biz-a');
+    expect(b.businessId).toBe('biz-b');
+    expect(a.businessId).not.toBe(b.businessId);
   });
 });

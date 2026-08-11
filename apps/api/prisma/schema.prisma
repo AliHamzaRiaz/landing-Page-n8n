@@ -231,7 +231,8 @@ model WhatsAppAccount {
   id                   String                   @id @default(cuid())
   businessId           String                   @unique
   business             Business                 @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  phoneNumberId        String
+  /// Meta WhatsApp Cloud API phone_number_id (unique across platform)
+  phoneNumberId        String                   @unique
   wabaId               String?
   displayPhoneNumber   String?
   accessTokenEncrypted String
