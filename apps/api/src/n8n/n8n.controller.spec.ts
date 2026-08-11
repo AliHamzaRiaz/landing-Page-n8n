@@ -1,6 +1,6 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, WorkflowStatus } from '@prisma/client';
 import { OrderIntakeService } from '../orders/order-intake.service';
 import { N8nOrdersService } from './n8n-orders.service';
 import { N8nController } from './n8n.controller';
@@ -22,9 +22,27 @@ describe('N8nController S2S auth', () => {
     createFromWhatsApp: jest.fn(),
   };
 
+  const baseCallbackDto = {
+    businessId: 'biz-1',
+    customerPhone: '+923001234567',
+    customerName: 'Test Customer',
+    items: [{ name: 'Item A', quantity: 1, unitPrice: 100 }],
+  };
+
+  const createdOrder = {
+    id: 'order-1',
+    orderNumber: 'ORD-00001',
+    status: OrderStatus.PENDING,
+  };
+
   beforeEach(async () => {
     jest.resetAllMocks();
     n8nService.verifyWebhookSecret.mockImplementation(() => undefined);
+    n8nOrders.assertBusinessExists.mockResolvedValue(undefined);
+    orderIntake.createFromWhatsApp.mockResolvedValue({ id: 'order-1' });
+    n8nOrders.getOrder.mockResolvedValue(createdOrder);
+    n8nService.markExecution.mockResolvedValue(null);
+
     const moduleRef = await Test.createTestingModule({
       controllers: [N8nController],
       providers: [
@@ -71,5 +89,94 @@ describe('N8nController S2S auth', () => {
       'o1',
       OrderStatus.CONFIRMED,
     );
+  });
+
+  it('creates order when workflowExecutionId exists locally', async () => {
+    n8nService.markExecution.mockResolvedValue({
+      id: 'exec-local',
+      status: WorkflowStatus.SUCCESS,
+    });
+
+    const result = await controller.callback('secret', {
+      ...baseCallbackDto,
+      workflowExecutionId: 'exec-local',
+    });
+
+    expect(orderIntake.createFromWhatsApp).toHaveBeenCalled();
+    expect(n8nService.markExecution).toHaveBeenCalledWith(
+      'exec-local',
+      WorkflowStatus.SUCCESS,
+      { orderId: 'order-1' },
+    );
+    expect(result.success).toBe(true);
+    expect(result.order).toEqual(
+      expect.objectContaining({ id: 'order-1', orderNumber: 'ORD-00001' }),
+    );
+  });
+
+  it('creates order when workflowExecutionId is missing', async () => {
+    const result = await controller.callback('secret', { ...baseCallbackDto });
+
+    expect(orderIntake.createFromWhatsApp).toHaveBeenCalled();
+    expect(n8nService.markExecution).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+    expect(result.order).toEqual(expect.objectContaining({ id: 'order-1' }));
+  });
+
+  it('creates order when workflowExecutionId is unknown (n8n cloud id)', async () => {
+    n8nService.markExecution.mockResolvedValue(null);
+
+    const result = await controller.callback('secret', {
+      ...baseCallbackDto,
+      workflowExecutionId: 'n8n-cloud-exec-999',
+    });
+
+    expect(orderIntake.createFromWhatsApp).toHaveBeenCalled();
+    expect(n8nService.markExecution).toHaveBeenCalledWith(
+      'n8n-cloud-exec-999',
+      WorkflowStatus.SUCCESS,
+      { orderId: 'order-1' },
+    );
+    expect(result.success).toBe(true);
+    expect(result.order).toEqual(expect.objectContaining({ id: 'order-1' }));
+  });
+
+  it('still creates order if markExecution throws', async () => {
+    n8nService.markExecution.mockRejectedValue(
+      new Error('No record was found for an update'),
+    );
+
+    const result = await controller.callback('secret', {
+      ...baseCallbackDto,
+      workflowExecutionId: 'broken-id',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.order).toEqual(expect.objectContaining({ id: 'order-1' }));
+  });
+
+  it('rejects callback with invalid x-n8n-secret', async () => {
+    n8nService.verifyWebhookSecret.mockImplementation(() => {
+      throw new UnauthorizedException('Invalid n8n webhook secret');
+    });
+
+    await expect(
+      controller.callback(undefined, { ...baseCallbackDto }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(orderIntake.createFromWhatsApp).not.toHaveBeenCalled();
+  });
+
+  it('rejects callback with invalid businessId', async () => {
+    n8nOrders.assertBusinessExists.mockRejectedValue(
+      new NotFoundException('Business not found'),
+    );
+
+    await expect(
+      controller.callback('secret', {
+        ...baseCallbackDto,
+        businessId: 'missing-biz',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(orderIntake.createFromWhatsApp).not.toHaveBeenCalled();
   });
 });

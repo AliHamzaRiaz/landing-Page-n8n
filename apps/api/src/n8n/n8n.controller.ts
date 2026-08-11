@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Logger,
   Param,
   Patch,
   Post,
@@ -19,17 +20,14 @@ import { N8nService } from './n8n.service';
 
 @Controller('n8n')
 export class N8nController {
+  private readonly logger = new Logger(N8nController.name);
+
   constructor(
     private readonly n8nService: N8nService,
     private readonly n8nOrders: N8nOrdersService,
     private readonly orderIntake: OrderIntakeService,
   ) {}
 
-  /**
-   * Existing create-order callback used by n8n.
-   * Business is identified by dto.businessId (set by Nest when triggering n8n
-   * after webhook lookup by Meta phone_number_id). Kept compatible.
-   */
   @Public()
   @Post('callback')
   async callback(
@@ -55,11 +53,19 @@ export class N8nController {
     });
 
     if (dto.workflowExecutionId) {
-      await this.n8nService.markExecution(
-        dto.workflowExecutionId,
-        WorkflowStatus.SUCCESS,
-        { orderId: created.id },
-      );
+      try {
+        await this.n8nService.markExecution(
+          dto.workflowExecutionId,
+          WorkflowStatus.SUCCESS,
+          { orderId: created.id },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `WorkflowExecution tracking failed for ${dto.workflowExecutionId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
 
     const order = await this.n8nOrders.getOrder(created.id);

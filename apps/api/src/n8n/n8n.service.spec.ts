@@ -1,6 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
+import { WorkflowStatus } from '@prisma/client';
 import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 import { N8nService } from './n8n.service';
@@ -14,6 +15,7 @@ describe('N8nService', () => {
     workflowExecution: {
       create: jest.fn(),
       update: jest.fn(),
+      findUnique: jest.fn(),
     },
   };
 
@@ -35,6 +37,7 @@ describe('N8nService', () => {
     jest.clearAllMocks();
     prisma.workflowExecution.create.mockResolvedValue({ id: 'exec-1' });
     prisma.workflowExecution.update.mockResolvedValue({});
+    prisma.workflowExecution.findUnique.mockResolvedValue(null);
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -69,5 +72,41 @@ describe('N8nService', () => {
     expect(result.status).toBe('FAILED');
     expect(result.error).toContain('connection refused');
     expect(prisma.workflowExecution.update).toHaveBeenCalled();
+  });
+
+  it('updates WorkflowExecution when local id exists', async () => {
+    prisma.workflowExecution.findUnique.mockResolvedValue({ id: 'exec-local' });
+    prisma.workflowExecution.update.mockResolvedValue({
+      id: 'exec-local',
+      status: WorkflowStatus.SUCCESS,
+    });
+
+    const result = await service.markExecution(
+      'exec-local',
+      WorkflowStatus.SUCCESS,
+      { orderId: 'o1' },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({ id: 'exec-local', status: WorkflowStatus.SUCCESS }),
+    );
+    expect(prisma.workflowExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'exec-local' },
+        data: expect.objectContaining({ status: WorkflowStatus.SUCCESS }),
+      }),
+    );
+  });
+
+  it('skips update and does not throw for unknown workflowExecutionId', async () => {
+    prisma.workflowExecution.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.markExecution('n8n-cloud-exec-999', WorkflowStatus.SUCCESS, {
+        orderId: 'o1',
+      }),
+    ).resolves.toBeNull();
+
+    expect(prisma.workflowExecution.update).not.toHaveBeenCalled();
   });
 });

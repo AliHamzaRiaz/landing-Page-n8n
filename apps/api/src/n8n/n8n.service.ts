@@ -158,12 +158,29 @@ export class N8nService {
     };
   }
 
+  /**
+   * Marks a local Prisma WorkflowExecution only.
+   * n8n Cloud execution IDs are not Prisma ids — missing records are skipped
+   * without throwing so order callbacks keep succeeding.
+   */
   async markExecution(
     id: string,
     status: WorkflowStatus,
     output?: unknown,
     error?: string,
   ) {
+    const existing = await this.prisma.workflowExecution.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      this.logger.warn(
+        `Skipping WorkflowExecution update; id is not a local record: ${id}`,
+      );
+      return null;
+    }
+
     return this.prisma.workflowExecution.update({
       where: { id },
       data: {
