@@ -140,7 +140,7 @@ export class N8nOrdersService {
       throw new BadRequestException('phoneNumberId is required');
     }
 
-    const byMeta = await this.prisma.business.findFirst({
+    const byMeta = await this.prisma.business.findUnique({
       where: { metaPhoneNumberId: id },
       select: {
         id: true,

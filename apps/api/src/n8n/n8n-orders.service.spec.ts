@@ -9,7 +9,7 @@ describe('N8nOrdersService', () => {
   let service: N8nOrdersService;
 
   const prisma = {
-    business: { findUnique: jest.fn(), findFirst: jest.fn() },
+    business: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
     whatsAppAccount: { findUnique: jest.fn() },
     order: {
       findUnique: jest.fn(),
@@ -197,7 +197,7 @@ describe('N8nOrdersService', () => {
   });
 
   it('resolves business by metaPhoneNumberId', async () => {
-    prisma.business.findFirst.mockResolvedValue({
+    prisma.business.findUnique.mockResolvedValue({
       id: 'cmsn4guam0000v9w0n3npytin',
       name: 'My Business',
       companyName: 'ABC Garments',
@@ -216,7 +216,7 @@ describe('N8nOrdersService', () => {
   });
 
   it('falls back to WhatsAppAccount.phoneNumberId', async () => {
-    prisma.business.findFirst.mockResolvedValue(null);
+    prisma.business.findUnique.mockResolvedValue(null);
     prisma.whatsAppAccount.findUnique.mockResolvedValue({
       phoneNumberId: '999888777',
       displayPhoneNumber: '+923001112233',
@@ -236,7 +236,7 @@ describe('N8nOrdersService', () => {
   });
 
   it('returns 404 when phone_number_id is unknown', async () => {
-    prisma.business.findFirst.mockResolvedValue(null);
+    prisma.business.findUnique.mockResolvedValue(null);
     prisma.whatsAppAccount.findUnique.mockResolvedValue(null);
 
     await expect(
@@ -250,7 +250,7 @@ describe('N8nOrdersService', () => {
   });
 
   it('maps distinct phone_number_ids to distinct businesses', async () => {
-    prisma.business.findFirst
+    prisma.business.findUnique
       .mockResolvedValueOnce({
         id: 'biz-a',
         name: 'A',

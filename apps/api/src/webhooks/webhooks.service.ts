@@ -106,35 +106,18 @@ export class WebhooksService {
         const phoneNumberId = value.metadata?.phone_number_id;
         if (!phoneNumberId) continue;
 
-        // Prefer Business.metaPhoneNumberId, fall back to WhatsAppAccount
-        let businessId: string | null = null;
-        const byBusiness = await this.prisma.business.findFirst({
-          where: { metaPhoneNumberId: phoneNumberId },
-          select: { id: true },
-        });
-        if (byBusiness) {
-          businessId = byBusiness.id;
-        } else {
-          const account =
-            await this.whatsappService.findBusinessByPhoneNumberId(
-              phoneNumberId,
-            );
-          if (account) {
-            businessId = account.businessId;
-            await this.prisma.whatsAppAccount.update({
-              where: { id: account.id },
-              data: { lastWebhookAt: new Date() },
-            });
-            await this.prisma.business.update({
-              where: { id: businessId },
-              data: { metaPhoneNumberId: phoneNumberId },
-            });
-          }
-        }
+        const businessId =
+          await this.whatsappService.resolveBusinessIdFromMetaMetadata({
+            phoneNumberId,
+            displayPhoneNumber: value.metadata?.display_phone_number,
+          });
 
         if (!businessId) {
           this.logger.warn(
-            `No business mapped for phone_number_id=${phoneNumberId}`,
+            `No business mapped for phone_number_id=${phoneNumberId}` +
+              (value.metadata?.display_phone_number
+                ? ` display_phone_number=${value.metadata.display_phone_number}`
+                : ''),
           );
           continue;
         }
