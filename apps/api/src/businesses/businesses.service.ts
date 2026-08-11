@@ -21,9 +21,11 @@ export class BusinessesService {
   ) {}
 
   private normalizePhone(phone: string) {
-    const digits = phone.replace(/[^\d+]/g, '');
-    if (digits.startsWith('+')) return `+${digits.slice(1).replace(/\D/g, '')}`;
-    return `+${digits.replace(/\D/g, '')}`;
+    let digits = phone.replace(/\D/g, '');
+    if (digits.startsWith('92') && digits.length > 3 && digits[2] === '0') {
+      digits = `92${digits.slice(3)}`;
+    }
+    return `+${digits}`;
   }
 
   private present(business: {

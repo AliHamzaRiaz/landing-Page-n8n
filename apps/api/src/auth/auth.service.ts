@@ -30,9 +30,13 @@ export class AuthService {
   ) {}
 
   normalizePhone(phone: string) {
-    const digits = phone.replace(/[^\d+]/g, '');
-    if (digits.startsWith('+')) return `+${digits.slice(1).replace(/\D/g, '')}`;
-    return `+${digits.replace(/\D/g, '')}`;
+    let digits = phone.replace(/\D/g, '');
+    // Common mistake: country code + trunk 0 (e.g. 92 + 0313... → 920313...).
+    // E.164 national numbers must not keep the leading 0.
+    if (digits.startsWith('92') && digits.length > 3 && digits[2] === '0') {
+      digits = `92${digits.slice(3)}`;
+    }
+    return `+${digits}`;
   }
 
   async register(dto: RegisterDto) {

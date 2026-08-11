@@ -12,8 +12,18 @@ export const COUNTRY_CODES = [
 ] as const
 
 export function normalizePhone(countryCode: string, localNumber: string): string {
-  const digits = localNumber.replace(/\D/g, '')
   const code = countryCode.startsWith('+') ? countryCode : `+${countryCode}`
+  const codeDigits = code.replace(/\D/g, '')
+  let digits = localNumber.replace(/\D/g, '')
+
+  // If user pasted a full international number into the local field, strip CC.
+  if (digits.startsWith(codeDigits)) {
+    digits = digits.slice(codeDigits.length)
+  }
+
+  // Drop trunk prefix "0" (e.g. PK 0313... with +92 → +92313..., not +920313...).
+  digits = digits.replace(/^0+/, '')
+
   return `${code}${digits}`
 }
 
