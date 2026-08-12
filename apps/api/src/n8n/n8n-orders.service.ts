@@ -130,26 +130,35 @@ export class N8nOrdersService {
   }
 
   /**
-   * n8n may send Prisma id, orderNumber (ORD-00001), or a prefixed ref
-   * (e.g. confirm_ORD-00001). Resolve to the internal Order.id.
+   * n8n may send Prisma id, orderNumber (ORD-00001), or a button-prefixed ref
+   * (e.g. confirm_<cuid>, cancel_<cuid>, confirm_ORD-00001).
+   * Resolve to the internal Order.id.
    */
   async resolveOrderId(orderRef: string): Promise<string> {
-    const ref = orderRef?.trim();
-    if (!ref) {
+    const raw = orderRef?.trim();
+    if (!raw) {
       throw new BadRequestException('orderId is required');
     }
 
-    const byId = await this.prisma.order.findUnique({
-      where: { id: ref },
-      select: { id: true },
-    });
-    if (byId) return byId.id;
+    // Strip WhatsApp button action prefixes used by n8n Send Confirm Buttons.
+    const ref = raw.replace(/^(confirm_|cancel_|cfm_|cnl_)/i, '');
 
-    const candidates = new Set<string>([ref]);
-    const ordMatch = ref.match(/ORD-[A-Za-z0-9_-]+/i);
-    if (ordMatch) {
-      candidates.add(ordMatch[0]);
-      candidates.add(ordMatch[0].toUpperCase());
+    const tryIds = Array.from(new Set([raw, ref].filter(Boolean)));
+    for (const id of tryIds) {
+      const byId = await this.prisma.order.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      if (byId) return byId.id;
+    }
+
+    const candidates = new Set<string>(tryIds);
+    for (const value of tryIds) {
+      const ordMatch = value.match(/ORD-[A-Za-z0-9_-]+/i);
+      if (ordMatch) {
+        candidates.add(ordMatch[0]);
+        candidates.add(ordMatch[0].toUpperCase());
+      }
     }
 
     for (const orderNumber of candidates) {

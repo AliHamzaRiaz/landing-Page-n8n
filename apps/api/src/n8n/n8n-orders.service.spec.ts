@@ -92,15 +92,64 @@ describe('N8nOrdersService', () => {
     );
   });
 
+  it('updateStatus resolves confirm_<cuid> button ids to Order.id', async () => {
+    const presented = {
+      id: 'cmsowpb11000bhw1y5tfa17i2',
+      orderNumber: 'ORD-00010',
+      status: OrderStatus.CONFIRMED,
+      totalAmount: 100,
+      currency: 'PKR',
+      notes: null,
+      deliveryAddress: null,
+      source: 'whatsapp-n8n',
+      whatsappMsgId: null,
+      confirmedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      businessId: 'b1',
+      customerId: 'c1',
+      customer: { id: 'c1', name: null, phone: '+92300' },
+      business: {
+        id: 'b1',
+        name: 'ABC',
+        companyName: 'ABC',
+        slug: 'abc',
+        whatsappNumber: null,
+      },
+      items: [],
+    };
+
+    prisma.order.findUnique
+      .mockResolvedValueOnce(null) // raw confirm_<cuid>
+      .mockResolvedValueOnce({ id: 'cmsowpb11000bhw1y5tfa17i2' }) // stripped cuid
+      .mockResolvedValueOnce({
+        id: 'cmsowpb11000bhw1y5tfa17i2',
+        status: OrderStatus.PENDING,
+        confirmedAt: null,
+        businessId: 'b1',
+      });
+    prisma.order.update.mockResolvedValue(presented);
+
+    const order = await service.updateStatus(
+      'confirm_cmsowpb11000bhw1y5tfa17i2',
+      OrderStatus.CONFIRMED,
+    );
+    expect(order.status).toBe(OrderStatus.CONFIRMED);
+    expect(order.id).toBe('cmsowpb11000bhw1y5tfa17i2');
+  });
+
   it('updateStatus resolves prefixed orderNumber refs', async () => {
     prisma.order.findUnique.mockResolvedValue(null);
     prisma.order.findFirst.mockResolvedValue({ id: 'o1' });
-    prisma.order.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
-      id: 'o1',
-      status: OrderStatus.PENDING,
-      confirmedAt: null,
-      businessId: 'b1',
-    });
+    prisma.order.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 'o1',
+        status: OrderStatus.PENDING,
+        confirmedAt: null,
+        businessId: 'b1',
+      });
     prisma.order.update.mockResolvedValue({
       id: 'o1',
       orderNumber: 'ORD-00001',
@@ -132,6 +181,7 @@ describe('N8nOrdersService', () => {
       OrderStatus.CONFIRMED,
     );
     expect(order.status).toBe(OrderStatus.CONFIRMED);
+    expect(prisma.order.findFirst).toHaveBeenCalled();
   });
 
   it('updateStatus writes history via n8n actor', async () => {
