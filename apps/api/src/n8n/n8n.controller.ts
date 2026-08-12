@@ -13,6 +13,7 @@ import { WorkflowStatus } from '@prisma/client';
 import { Public } from '../common/decorators/public.decorator';
 import { OrderIntakeService } from '../orders/order-intake.service';
 import { N8nCallbackDto } from './dto/n8n-callback.dto';
+import { N8nCallbackStatusDto } from './dto/n8n-callback-status.dto';
 import { N8nListOrdersDto } from './dto/n8n-list-orders.dto';
 import { N8nUpdateStatusDto } from './dto/n8n-update-status.dto';
 import { N8nOrdersService } from './n8n-orders.service';
@@ -73,6 +74,26 @@ export class N8nController {
     return {
       success: true,
       message: 'Order created from n8n callback',
+      data: order,
+      order,
+    };
+  }
+
+  /**
+   * n8n confirm/cancel flow — same URL as create callback, PATCH method.
+   * Body: { orderId, status } e.g. CONFIRMED or CANCELLED.
+   */
+  @Public()
+  @Patch('callback')
+  async callbackUpdateStatus(
+    @Headers('x-n8n-secret') secret: string | undefined,
+    @Body() dto: N8nCallbackStatusDto,
+  ) {
+    this.n8nService.verifyWebhookSecret(secret);
+    const order = await this.n8nOrders.updateStatus(dto.orderId, dto.status);
+    return {
+      success: true,
+      message: 'Order status updated successfully',
       data: order,
       order,
     };

@@ -92,6 +92,59 @@ describe('N8nController S2S auth', () => {
     );
   });
 
+  it('confirms order via PATCH /n8n/callback', async () => {
+    n8nOrders.updateStatus.mockResolvedValue({
+      id: 'order-1',
+      orderNumber: 'ORD-00001',
+      status: OrderStatus.CONFIRMED,
+    });
+
+    const result = await controller.callbackUpdateStatus('secret', {
+      orderId: 'order-1',
+      status: OrderStatus.CONFIRMED,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toBe('Order status updated successfully');
+    expect(result.order.status).toBe(OrderStatus.CONFIRMED);
+    expect(n8nOrders.updateStatus).toHaveBeenCalledWith(
+      'order-1',
+      OrderStatus.CONFIRMED,
+    );
+  });
+
+  it('cancels order via PATCH /n8n/callback', async () => {
+    n8nOrders.updateStatus.mockResolvedValue({
+      id: 'order-1',
+      status: OrderStatus.CANCELLED,
+    });
+
+    const result = await controller.callbackUpdateStatus('secret', {
+      orderId: 'order-1',
+      status: OrderStatus.CANCELLED,
+    });
+
+    expect(result.order.status).toBe(OrderStatus.CANCELLED);
+    expect(n8nOrders.updateStatus).toHaveBeenCalledWith(
+      'order-1',
+      OrderStatus.CANCELLED,
+    );
+  });
+
+  it('rejects PATCH /n8n/callback without valid secret', async () => {
+    n8nService.verifyWebhookSecret.mockImplementation(() => {
+      throw new UnauthorizedException('Invalid n8n webhook secret');
+    });
+
+    await expect(
+      controller.callbackUpdateStatus(undefined, {
+        orderId: 'order-1',
+        status: OrderStatus.CONFIRMED,
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(n8nOrders.updateStatus).not.toHaveBeenCalled();
+  });
+
   it('creates order when workflowExecutionId exists locally', async () => {
     n8nService.markExecution.mockResolvedValue({
       id: 'exec-local',
