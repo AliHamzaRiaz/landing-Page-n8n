@@ -13,6 +13,7 @@ describe('N8nOrdersService', () => {
     whatsAppAccount: { findUnique: jest.fn() },
     order: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
       update: jest.fn(),
@@ -37,7 +38,9 @@ describe('N8nOrdersService', () => {
   });
 
   it('getOrder returns presented order without secrets', async () => {
-    prisma.order.findUnique.mockResolvedValue({
+    prisma.order.findUnique
+      .mockResolvedValueOnce({ id: 'o1' })
+      .mockResolvedValueOnce({
       id: 'o1',
       orderNumber: 'ORD-00001',
       status: OrderStatus.PENDING,
@@ -83,13 +86,58 @@ describe('N8nOrdersService', () => {
 
   it('getOrder throws when missing', async () => {
     prisma.order.findUnique.mockResolvedValue(null);
+    prisma.order.findFirst.mockResolvedValue(null);
     await expect(service.getOrder('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
 
+  it('updateStatus resolves prefixed orderNumber refs', async () => {
+    prisma.order.findUnique.mockResolvedValue(null);
+    prisma.order.findFirst.mockResolvedValue({ id: 'o1' });
+    prisma.order.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 'o1',
+      status: OrderStatus.PENDING,
+      confirmedAt: null,
+      businessId: 'b1',
+    });
+    prisma.order.update.mockResolvedValue({
+      id: 'o1',
+      orderNumber: 'ORD-00001',
+      status: OrderStatus.CONFIRMED,
+      totalAmount: 100,
+      currency: 'PKR',
+      notes: null,
+      deliveryAddress: null,
+      source: 'whatsapp-n8n',
+      whatsappMsgId: null,
+      confirmedAt: new Date(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      businessId: 'b1',
+      customerId: 'c1',
+      customer: { id: 'c1', name: null, phone: '+92300' },
+      business: {
+        id: 'b1',
+        name: 'ABC',
+        companyName: 'ABC',
+        slug: 'abc',
+        whatsappNumber: null,
+      },
+      items: [],
+    });
+
+    const order = await service.updateStatus(
+      'confirm_ORD-00001',
+      OrderStatus.CONFIRMED,
+    );
+    expect(order.status).toBe(OrderStatus.CONFIRMED);
+  });
+
   it('updateStatus writes history via n8n actor', async () => {
-    prisma.order.findUnique.mockResolvedValue({
+    prisma.order.findUnique
+      .mockResolvedValueOnce({ id: 'o1' })
+      .mockResolvedValueOnce({
       id: 'o1',
       status: OrderStatus.PENDING,
       confirmedAt: null,

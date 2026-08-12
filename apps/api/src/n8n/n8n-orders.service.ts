@@ -130,6 +130,40 @@ export class N8nOrdersService {
   }
 
   /**
+   * n8n may send Prisma id, orderNumber (ORD-00001), or a prefixed ref
+   * (e.g. confirm_ORD-00001). Resolve to the internal Order.id.
+   */
+  async resolveOrderId(orderRef: string): Promise<string> {
+    const ref = orderRef?.trim();
+    if (!ref) {
+      throw new BadRequestException('orderId is required');
+    }
+
+    const byId = await this.prisma.order.findUnique({
+      where: { id: ref },
+      select: { id: true },
+    });
+    if (byId) return byId.id;
+
+    const candidates = new Set<string>([ref]);
+    const ordMatch = ref.match(/ORD-[A-Za-z0-9_-]+/i);
+    if (ordMatch) {
+      candidates.add(ordMatch[0]);
+      candidates.add(ordMatch[0].toUpperCase());
+    }
+
+    for (const orderNumber of candidates) {
+      const byNumber = await this.prisma.order.findFirst({
+        where: { orderNumber: { equals: orderNumber, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (byNumber) return byNumber.id;
+    }
+
+    throw new NotFoundException('Order not found');
+  }
+
+  /**
    * Resolve owning business from Meta WhatsApp Cloud API phone_number_id.
    * Prefers Business.metaPhoneNumberId, then WhatsAppAccount.phoneNumberId.
    * Never uses the customer WhatsApp `from` number.
@@ -193,8 +227,9 @@ export class N8nOrdersService {
   }
 
   async getOrder(orderId: string) {
+    const id = await this.resolveOrderId(orderId);
     const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
+      where: { id },
       include: ORDER_INCLUDE,
     });
     if (!order) {
@@ -245,8 +280,9 @@ export class N8nOrdersService {
   }
 
   async updateStatus(orderId: string, status: OrderStatus) {
+    const id = await this.resolveOrderId(orderId);
     const existing = await this.prisma.order.findUnique({
-      where: { id: orderId },
+      where: { id },
       select: { id: true, status: true, confirmedAt: true, businessId: true },
     });
     if (!existing) {
@@ -263,7 +299,7 @@ export class N8nOrdersService {
     }
 
     const order = await this.prisma.order.update({
-      where: { id: orderId },
+      where: { id },
       data: {
         status,
         confirmedAt:
