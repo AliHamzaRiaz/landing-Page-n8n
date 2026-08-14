@@ -2,27 +2,29 @@
 
 Ennitant code is implemented end-to-end. Live WhatsApp delivery and production OTP need **your** credentials.
 
-## 1) Meta WhatsApp Cloud API
+## 1) Meta WhatsApp Cloud API + Embedded Signup
 
 | What | Where to get it | Env var (`apps/api/.env`) |
 |------|-----------------|---------------------------|
-| App Secret | [Meta Developer](https://developers.facebook.com/) → Your App → Settings → Basic → App Secret | `META_APP_SECRET` |
+| App ID | Meta Developer → Your App → Settings → Basic | `META_APP_ID` |
+| App Secret | Meta Developer → Your App → Settings → Basic | `META_APP_SECRET` |
 | Verify Token | You invent a long random string; paste the **same** value in Meta webhook settings and `.env` | `META_VERIFY_TOKEN` |
-| Permanent / System User Access Token | Meta → WhatsApp → API Setup (or Business Settings → System Users) | `WHATSAPP_ACCESS_TOKEN` |
-| Phone Number ID | Meta → WhatsApp → API Setup → Phone number ID | `WHATSAPP_PHONE_NUMBER_ID` |
-| WhatsApp Business Account ID | Meta → WhatsApp → API Setup → WhatsApp Business Account ID | `WHATSAPP_BUSINESS_ACCOUNT_ID` |
+| Embedded Signup Config ID | Meta Developer → WhatsApp → Embedded Signup → Configuration ID | `META_EMBEDDED_SIGNUP_CONFIG_ID` |
+| Encryption key | Generate 32-byte hex (64 chars) | `ENCRYPTION_KEY` |
+
+**Production:** Do **not** set `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, or `WHATSAPP_BUSINESS_ACCOUNT_ID`. Each business connects via Embedded Signup in the dashboard/onboarding.
+
+**Local dev only:** Set `WHATSAPP_PLATFORM_FALLBACK=true` plus the legacy `WHATSAPP_*` vars if you need single-tenant testing without Meta OAuth.
 
 ### Webhook URL (Meta dashboard)
 
-1. Deploy or tunnel your API with **HTTPS** (ngrok, Cloudflare Tunnel, or production host).
+1. Deploy or tunnel your API with **HTTPS**.
 2. In Meta → WhatsApp → Configuration → Webhook:
    - Callback URL: `https://YOUR_PUBLIC_API/api/webhooks/whatsapp`
    - Verify token: same as `META_VERIFY_TOKEN`
-3. Subscribe to `messages`.
+3. Subscribe to `messages` and `account_update`.
 
-Without a public HTTPS URL, Meta cannot deliver customer messages to localhost.
-
-Onboarding auto-attaches platform credentials from `WHATSAPP_ACCESS_TOKEN` + `WHATSAPP_PHONE_NUMBER_ID` so business owners never paste Meta IDs.
+Business owners connect WhatsApp via **Connect WhatsApp** (Embedded Signup) — no manual token entry.
 
 ## 2) Public HTTPS for the API
 

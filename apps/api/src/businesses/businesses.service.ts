@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { randomInt } from 'crypto';
+import { ConfigService } from '@nestjs/config';
+import { isPlatformFallbackEnabled } from '../common/env/production-guards';
 import { OtpService } from '../otp/otp.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
@@ -18,7 +20,12 @@ export class BusinessesService {
     private readonly prisma: PrismaService,
     private readonly otpService: OtpService,
     private readonly whatsapp: WhatsAppService,
+    private readonly config: ConfigService,
   ) {}
+
+  private isDevPlatformFallback() {
+    return isPlatformFallbackEnabled(this.config);
+  }
 
   private normalizePhone(phone: string) {
     let digits = phone.replace(/\D/g, '');
@@ -127,12 +134,12 @@ export class BusinessesService {
         slug,
         whatsappNumber,
         phone: whatsappNumber,
-        whatsappVerified: sameAsSignup ? true : false,
-        onboardingCompleted: sameAsSignup,
+        whatsappVerified: false,
+        onboardingCompleted: false,
       },
     });
 
-    if (sameAsSignup) {
+    if (sameAsSignup && this.isDevPlatformFallback()) {
       await this.whatsapp
         .attachPlatformCredentials(businessId, whatsappNumber)
         .catch(() => undefined);
@@ -140,11 +147,12 @@ export class BusinessesService {
 
     return {
       message: sameAsSignup
-        ? 'Business setup complete'
+        ? 'Business details saved'
         : 'Please verify your WhatsApp number',
       data: {
         ...this.present(updated),
         requiresWhatsAppOtp,
+        requiresWhatsAppConnect: true,
         ...(devCode ? { devCode } : {}),
       },
     };
@@ -167,44 +175,52 @@ export class BusinessesService {
       dto.whatsappNumber || business.whatsappNumber || user.phoneNumber,
     );
 
-    if (dto.code) {
-      if (!user.otpHash || !user.otpExpiresAt) {
-        throw new BadRequestException('No verification code found');
-      }
-      if (user.otpExpiresAt.getTime() < Date.now()) {
-        throw new BadRequestException('Code expired. Please try again.');
-      }
-      const valid = await argon2.verify(user.otpHash, dto.code);
-      if (!valid) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { otpAttempts: { increment: 1 } },
-        });
-        throw new BadRequestException('Invalid verification code');
-      }
+    if (!user.otpHash || !user.otpExpiresAt) {
+      throw new BadRequestException(
+        'No verification code found. Restart onboarding.',
+      );
+    }
+    if (!dto.code?.trim()) {
+      throw new BadRequestException('Verification code is required');
+    }
+    if (user.otpExpiresAt.getTime() < Date.now()) {
+      throw new BadRequestException('Code expired. Please try again.');
+    }
+    const valid = await argon2.verify(user.otpHash, dto.code.trim());
+    if (!valid) {
       await this.prisma.user.update({
         where: { id: userId },
-        data: { otpHash: null, otpExpiresAt: null, otpAttempts: 0 },
+        data: { otpAttempts: { increment: 1 } },
       });
+      throw new BadRequestException('Invalid verification code');
     }
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { otpHash: null, otpExpiresAt: null, otpAttempts: 0 },
+    });
 
     const updated = await this.prisma.business.update({
       where: { id: businessId },
       data: {
         whatsappNumber,
         phone: whatsappNumber,
-        whatsappVerified: true,
-        onboardingCompleted: true,
+        whatsappVerified: false,
+        onboardingCompleted: false,
       },
     });
 
-    await this.whatsapp
-      .attachPlatformCredentials(businessId, whatsappNumber)
-      .catch(() => undefined);
+    if (this.isDevPlatformFallback()) {
+      await this.whatsapp
+        .attachPlatformCredentials(businessId, whatsappNumber)
+        .catch(() => undefined);
+    }
 
     return {
-      message: 'WhatsApp connected successfully',
-      data: this.present(updated),
+      message: 'WhatsApp number verified. Connect your WhatsApp Business account.',
+      data: {
+        ...this.present(updated),
+        requiresWhatsAppConnect: true,
+      },
     };
   }
 

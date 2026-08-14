@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -7,15 +8,21 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   MessageDirection,
+  Prisma,
   WhatsAppConnectionStatus,
 } from '@prisma/client';
 import {
   decryptSecret,
   encryptSecret,
 } from '../common/crypto/token-crypto';
+import {
+  encryptionSecret,
+  isPlatformFallbackEnabled,
+} from '../common/env/production-guards';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectWhatsAppDto } from './dto/connect-whatsapp.dto';
+import { EmbeddedSignupCompleteDto } from './dto/embedded-signup-complete.dto';
 import { MetaWhatsAppClient } from './meta-whatsapp.client';
 
 @Injectable()
@@ -29,41 +36,132 @@ export class WhatsAppService {
     private readonly notifications: NotificationsService,
   ) {}
 
-  private encryptionSecret() {
-    return (
-      this.config.get<string>('ENCRYPTION_KEY') ||
-      this.config.getOrThrow<string>('JWT_SECRET')
-    );
+  getEmbeddedSignupConfig() {
+    const appId = this.config.get<string>('META_APP_ID')?.trim();
+    const configId = this.config
+      .get<string>('META_EMBEDDED_SIGNUP_CONFIG_ID')
+      ?.trim();
+
+    if (!appId || !configId) {
+      throw new BadRequestException(
+        'WhatsApp Embedded Signup is not configured on the server',
+      );
+    }
+
+    return { appId, configId };
   }
 
-  private sanitizeAccount(account: {
-    id: string;
-    businessId: string;
-    phoneNumberId: string;
-    wabaId: string | null;
-    displayPhoneNumber: string | null;
-    status: WhatsAppConnectionStatus;
-    lastError: string | null;
-    lastWebhookAt?: Date | null;
-    connectedAt: Date | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }) {
-    // Never expose Meta Phone Number ID / WABA ID to the client
+  async completeEmbeddedSignup(
+    businessId: string,
+    userId: string,
+    dto: EmbeddedSignupCompleteDto,
+  ) {
+    const phoneNumberId = dto.phoneNumberId.trim();
+    const wabaId = dto.wabaId.trim();
+
+    await this.assertPhoneNumberIdAvailable(businessId, phoneNumberId);
+
+    let accessToken: string;
+    let tokenExpiresAt: Date | null = null;
+
+    try {
+      const exchanged = await this.meta.exchangeAuthorizationCode(dto.code);
+      accessToken = exchanged.accessToken;
+      if (exchanged.expiresIn) {
+        tokenExpiresAt = new Date(Date.now() + exchanged.expiresIn * 1000);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Embedded Signup token exchange failed for businessId=${businessId}`,
+      );
+      throw new BadRequestException(
+        'Unable to complete WhatsApp connection with Meta. Please try again.',
+      );
+    }
+
+    const validation = await this.meta.validateCredentials({
+      phoneNumberId,
+      accessToken,
+    });
+
+    if (!validation.ok) {
+      throw new BadRequestException(
+        'Meta rejected the WhatsApp credentials. Ensure the phone number is fully registered.',
+      );
+    }
+
+    const subscribed = await this.meta.subscribeWaba(wabaId, accessToken);
+    if (!subscribed) {
+      throw new BadRequestException(
+        'Connected to Meta but webhook subscription failed. Contact support.',
+      );
+    }
+
+    const displayPhoneNumber =
+      dto.displayPhoneNumber?.trim() ||
+      validation.displayPhoneNumber ||
+      null;
+
+    const encrypted = encryptSecret(accessToken, encryptionSecret(this.config));
+    const now = new Date();
+
+    const account = await this.prisma.whatsAppAccount.upsert({
+      where: { businessId },
+      create: {
+        businessId,
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber,
+        accessTokenEncrypted: encrypted,
+        status: WhatsAppConnectionStatus.CONNECTED,
+        lastError: null,
+        connectedAt: now,
+        embeddedSignupAt: now,
+        connectedByUserId: userId,
+        tokenExpiresAt,
+        connectionMetadata: {
+          verifiedName: validation.verifiedName ?? null,
+          wabaId,
+        } as Prisma.InputJsonValue,
+      },
+      update: {
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber: displayPhoneNumber || undefined,
+        accessTokenEncrypted: encrypted,
+        status: WhatsAppConnectionStatus.CONNECTED,
+        lastError: null,
+        connectedAt: now,
+        embeddedSignupAt: now,
+        connectedByUserId: userId,
+        tokenExpiresAt,
+        connectionMetadata: {
+          verifiedName: validation.verifiedName ?? null,
+          wabaId,
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    await this.syncIntegrationAndBusiness(businessId, account, displayPhoneNumber);
+
+    await this.prisma.auditLog.create({
+      data: {
+        businessId,
+        userId,
+        action: 'whatsapp.embedded_signup.connected',
+        entity: 'WhatsAppAccount',
+        entityId: account.id,
+        metadata: {
+          phoneNumberId,
+          wabaId,
+          displayPhoneNumber,
+        },
+      },
+    });
+
     return {
-      displayPhoneNumber: account.displayPhoneNumber,
-      phoneNumber: account.displayPhoneNumber,
-      status: account.status,
-      lastError: account.lastError
-        ? 'WhatsApp connection needs attention. Contact support if this persists.'
-        : null,
-      errorMessage: account.lastError
-        ? 'WhatsApp connection needs attention. Contact support if this persists.'
-        : null,
-      lastWebhookAt: account.lastWebhookAt ?? null,
-      lastCheckedAt: account.updatedAt,
-      connectedAt: account.connectedAt,
-      connected: account.status === WhatsAppConnectionStatus.CONNECTED,
+      message: 'WhatsApp connected successfully',
+      data: this.sanitizeAccount(account),
     };
   }
 
@@ -73,12 +171,25 @@ export class WhatsAppService {
       accessToken: dto.accessToken,
     });
 
-    // Allow connect in local/dev even if Meta rejects (e.g. fake tokens)
+    if (!validation.ok && !isPlatformFallbackEnabled(this.config)) {
+      throw new BadRequestException(
+        'Meta rejected the WhatsApp credentials. Check phone number ID and access token.',
+      );
+    }
+
+    await this.assertPhoneNumberIdAvailable(
+      businessId,
+      dto.phoneNumberId.trim(),
+    );
+
     const status = validation.ok
       ? WhatsAppConnectionStatus.CONNECTED
-      : WhatsAppConnectionStatus.CONNECTED;
+      : WhatsAppConnectionStatus.ERROR;
 
-    const encrypted = encryptSecret(dto.accessToken, this.encryptionSecret());
+    const encrypted = encryptSecret(
+      dto.accessToken,
+      encryptionSecret(this.config),
+    );
 
     const account = await this.prisma.whatsAppAccount.upsert({
       where: { businessId },
@@ -92,8 +203,8 @@ export class WhatsAppService {
           null,
         accessTokenEncrypted: encrypted,
         status,
-        lastError: validation.ok ? null : 'Credentials stored; Meta validation skipped or failed',
-        connectedAt: new Date(),
+        lastError: validation.ok ? null : 'Meta credential validation failed',
+        connectedAt: validation.ok ? new Date() : null,
       },
       update: {
         phoneNumberId: dto.phoneNumberId.trim(),
@@ -104,71 +215,44 @@ export class WhatsAppService {
           undefined,
         accessTokenEncrypted: encrypted,
         status,
-        lastError: validation.ok ? null : 'Credentials stored; Meta validation skipped or failed',
-        connectedAt: new Date(),
+        lastError: validation.ok ? null : 'Meta credential validation failed',
+        connectedAt: validation.ok ? new Date() : null,
       },
     });
 
-    const existingIntegration = await this.prisma.integration.findFirst({
-      where: { businessId, type: 'whatsapp' },
-    });
-    const integrationConfig = {
-      phoneNumberId: account.phoneNumberId,
-      displayPhoneNumber: account.displayPhoneNumber,
-    };
-
-    if (existingIntegration) {
-      await this.prisma.integration.update({
-        where: { id: existingIntegration.id },
-        data: { isActive: true, config: integrationConfig },
-      });
-    } else {
-      await this.prisma.integration.create({
-        data: {
-          businessId,
-          type: 'whatsapp',
-          name: 'WhatsApp Cloud API',
-          isActive: true,
-          config: integrationConfig,
-        },
-      });
-    }
-
-    // Keep Business.metaPhoneNumberId in sync for webhook business lookup
-    await this.prisma.business.update({
-      where: { id: businessId },
-      data: {
-        metaPhoneNumberId: account.phoneNumberId,
-        wabaId: account.wabaId,
-        whatsappVerified: true,
-        whatsappNumber:
-          account.displayPhoneNumber || undefined,
-      },
-    });
+    await this.syncIntegrationAndBusiness(
+      businessId,
+      account,
+      account.displayPhoneNumber,
+    );
 
     return {
-      message: 'WhatsApp connected',
+      message: validation.ok ? 'WhatsApp connected' : 'WhatsApp connection failed validation',
       data: this.sanitizeAccount(account),
     };
   }
 
   /**
-   * Attach platform-level Meta credentials (from env) to a business
-   * so owners never enter Phone Number ID / access tokens.
+   * Dev-only: attach platform env credentials when WHATSAPP_PLATFORM_FALLBACK=true.
    */
   async attachPlatformCredentials(
     businessId: string,
     displayPhoneNumber?: string | null,
   ) {
+    if (!isPlatformFallbackEnabled(this.config)) {
+      this.logger.debug(
+        `Platform WhatsApp fallback disabled; businessId=${businessId} must use Embedded Signup`,
+      );
+      return null;
+    }
+
     const accessToken = this.config.get<string>('WHATSAPP_ACCESS_TOKEN');
     const phoneNumberId = this.config.get<string>('WHATSAPP_PHONE_NUMBER_ID');
     const wabaId = this.config.get<string>('WHATSAPP_BUSINESS_ACCOUNT_ID');
 
     if (!accessToken?.trim() || !phoneNumberId?.trim()) {
       this.logger.warn(
-        `Platform WhatsApp credentials not set (WHATSAPP_ACCESS_TOKEN / WHATSAPP_PHONE_NUMBER_ID). ` +
-          `businessId=${businessId} saved display number only; Meta phone_number_id was NOT persisted. ` +
-          `Connect WhatsApp via API/dashboard with Phone Number ID before n8n business lookup can succeed.`,
+        `Platform WhatsApp credentials not set for dev fallback. businessId=${businessId}`,
       );
       return null;
     }
@@ -181,61 +265,24 @@ export class WhatsAppService {
     });
   }
 
-  /**
-   * Normalize Meta display_phone_number / business WhatsApp digits for matching.
-   */
   normalizeWhatsAppDigits(phone: string): string {
     let digits = phone.replace(/\D/g, '');
     if (digits.startsWith('92') && digits.length > 3 && digits[2] === '0') {
       digits = `92${digits.slice(3)}`;
     }
-    // Drop leading 0 for national formats (0313... → 313...)
     if (digits.startsWith('0')) {
       digits = digits.replace(/^0+/, '');
     }
     return digits;
   }
 
-  /**
-   * Persist Meta phone_number_id on Business (and sync existing WhatsAppAccount if present).
-   * Does not invent businesses — only updates an existing businessId.
-   */
   async linkMetaPhoneNumberId(
     businessId: string,
     phoneNumberId: string,
     displayPhoneNumber?: string | null,
   ) {
+    await this.assertPhoneNumberIdAvailable(businessId, phoneNumberId.trim());
     const id = phoneNumberId.trim();
-    if (!id) {
-      throw new BadRequestException('phoneNumberId is required');
-    }
-
-    const conflict = await this.prisma.business.findFirst({
-      where: {
-        metaPhoneNumberId: id,
-        NOT: { id: businessId },
-      },
-      select: { id: true },
-    });
-    if (conflict) {
-      throw new BadRequestException(
-        'This WhatsApp phone_number_id is already linked to another business',
-      );
-    }
-
-    const accountConflict = await this.prisma.whatsAppAccount.findFirst({
-      where: {
-        phoneNumberId: id,
-        NOT: { businessId },
-      },
-      select: { id: true },
-    });
-    if (accountConflict) {
-      throw new BadRequestException(
-        'This WhatsApp phone_number_id is already linked to another business',
-      );
-    }
-
     const display = displayPhoneNumber?.trim() || undefined;
 
     await this.prisma.business.update({
@@ -269,11 +316,6 @@ export class WhatsAppService {
     return { businessId, phoneNumberId: id };
   }
 
-  /**
-   * Resolve business from Meta metadata.
-   * 1) phone_number_id on Business / WhatsAppAccount
-   * 2) else match display_phone_number to Business.whatsappNumber/phone and persist phone_number_id
-   */
   async resolveBusinessIdFromMetaMetadata(params: {
     phoneNumberId: string;
     displayPhoneNumber?: string | null;
@@ -289,9 +331,12 @@ export class WhatsAppService {
 
     const account = await this.prisma.whatsAppAccount.findUnique({
       where: { phoneNumberId },
-      select: { id: true, businessId: true },
+      select: { id: true, businessId: true, status: true },
     });
     if (account) {
+      if (account.status === WhatsAppConnectionStatus.DISCONNECTED) {
+        return null;
+      }
       await this.prisma.business.update({
         where: { id: account.businessId },
         data: { metaPhoneNumberId: phoneNumberId },
@@ -313,10 +358,7 @@ export class WhatsAppService {
 
     const candidates = await this.prisma.business.findMany({
       where: {
-        OR: [
-          { whatsappNumber: { not: null } },
-          { phone: { not: null } },
-        ],
+        OR: [{ whatsappNumber: { not: null } }, { phone: { not: null } }],
       },
       select: {
         id: true,
@@ -337,7 +379,7 @@ export class WhatsAppService {
     if (matches.length !== 1) {
       if (matches.length > 1) {
         this.logger.warn(
-          `Ambiguous display_phone_number=${display} matched ${matches.length} businesses; not auto-linking phone_number_id=${phoneNumberId}`,
+          `Ambiguous display_phone_number=${display} matched ${matches.length} businesses`,
         );
       }
       return null;
@@ -350,7 +392,7 @@ export class WhatsAppService {
       display.startsWith('+') ? display : `+${displayDigits}`,
     );
     this.logger.log(
-      `Auto-linked Meta phone_number_id=${phoneNumberId} to businessId=${business.id} via display_phone_number`,
+      `Auto-linked phone_number_id=${phoneNumberId} to businessId=${business.id}`,
     );
     return business.id;
   }
@@ -382,7 +424,7 @@ export class WhatsAppService {
     const account = await this.requireAccount(businessId);
     const token = decryptSecret(
       account.accessTokenEncrypted,
-      this.encryptionSecret(),
+      encryptionSecret(this.config),
     );
 
     const validation = await this.meta.validateCredentials({
@@ -404,7 +446,7 @@ export class WhatsAppService {
         message: 'Unable to validate WhatsApp credentials with Meta',
       });
       throw new BadRequestException(
-        'WhatsApp test failed. Check your access token and phone number ID.',
+        'WhatsApp test failed. Reconnect your WhatsApp Business account.',
       );
     }
 
@@ -429,7 +471,7 @@ export class WhatsAppService {
     };
   }
 
-  async disconnect(businessId: string) {
+  async disconnect(businessId: string, userId?: string) {
     const account = await this.prisma.whatsAppAccount.findUnique({
       where: { businessId },
     });
@@ -443,10 +485,11 @@ export class WhatsAppService {
         status: WhatsAppConnectionStatus.DISCONNECTED,
         accessTokenEncrypted: encryptSecret(
           'revoked',
-          this.encryptionSecret(),
+          encryptionSecret(this.config),
         ),
         lastError: null,
         connectedAt: null,
+        tokenExpiresAt: null,
       },
     });
 
@@ -455,6 +498,16 @@ export class WhatsAppService {
       data: {
         metaPhoneNumberId: null,
         whatsappVerified: false,
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        businessId,
+        userId: userId ?? null,
+        action: 'whatsapp.disconnected',
+        entity: 'WhatsAppAccount',
+        entityId: account.id,
       },
     });
 
@@ -469,7 +522,7 @@ export class WhatsAppService {
 
     const token = decryptSecret(
       account.accessTokenEncrypted,
-      this.encryptionSecret(),
+      encryptionSecret(this.config),
     );
 
     try {
@@ -494,7 +547,7 @@ export class WhatsAppService {
 
       return result;
     } catch (error) {
-      this.logger.error(`Failed to send WhatsApp message: ${String(error)}`);
+      this.logger.error(`Failed to send WhatsApp message for businessId=${businessId}`);
       await this.notifications.create(businessId, {
         type: 'WHATSAPP_ISSUE',
         title: 'Failed to send WhatsApp message',
@@ -504,6 +557,148 @@ export class WhatsAppService {
     }
   }
 
+  async handleAccountUpdate(params: {
+    wabaId?: string;
+    phoneNumberId?: string;
+    event?: string;
+  }) {
+    const phoneNumberId = params.phoneNumberId?.trim();
+    if (!phoneNumberId) return;
+
+    const account = await this.prisma.whatsAppAccount.findUnique({
+      where: { phoneNumberId },
+    });
+    if (!account) return;
+
+    const event = params.event?.toUpperCase() ?? '';
+    if (
+      event.includes('DISABLE') ||
+      event.includes('DISCONNECT') ||
+      event.includes('REVOK')
+    ) {
+      await this.prisma.whatsAppAccount.update({
+        where: { id: account.id },
+        data: {
+          status: WhatsAppConnectionStatus.DISCONNECTED,
+          lastError: 'Meta reported account disconnection',
+        },
+      });
+      await this.prisma.business.update({
+        where: { id: account.businessId },
+        data: { metaPhoneNumberId: null, whatsappVerified: false },
+      });
+    }
+  }
+
+  private async assertPhoneNumberIdAvailable(
+    businessId: string,
+    phoneNumberId: string,
+  ) {
+    const conflictBusiness = await this.prisma.business.findFirst({
+      where: {
+        metaPhoneNumberId: phoneNumberId,
+        NOT: { id: businessId },
+      },
+      select: { id: true },
+    });
+    if (conflictBusiness) {
+      throw new ConflictException(
+        'This WhatsApp phone number is already connected to another business',
+      );
+    }
+
+    const conflictAccount = await this.prisma.whatsAppAccount.findFirst({
+      where: {
+        phoneNumberId,
+        NOT: { businessId },
+      },
+      select: { id: true },
+    });
+    if (conflictAccount) {
+      throw new ConflictException(
+        'This WhatsApp phone number is already connected to another business',
+      );
+    }
+  }
+
+  private async syncIntegrationAndBusiness(
+    businessId: string,
+    account: {
+      phoneNumberId: string;
+      wabaId: string | null;
+      displayPhoneNumber: string | null;
+    },
+    displayPhoneNumber?: string | null,
+  ) {
+    const existingIntegration = await this.prisma.integration.findFirst({
+      where: { businessId, type: 'whatsapp' },
+    });
+    const integrationConfig = {
+      phoneNumberId: account.phoneNumberId,
+      displayPhoneNumber: account.displayPhoneNumber,
+    };
+
+    if (existingIntegration) {
+      await this.prisma.integration.update({
+        where: { id: existingIntegration.id },
+        data: { isActive: true, config: integrationConfig },
+      });
+    } else {
+      await this.prisma.integration.create({
+        data: {
+          businessId,
+          type: 'whatsapp',
+          name: 'WhatsApp Cloud API',
+          isActive: true,
+          config: integrationConfig,
+        },
+      });
+    }
+
+    const normalizedDisplay = displayPhoneNumber?.trim();
+    await this.prisma.business.update({
+      where: { id: businessId },
+      data: {
+        metaPhoneNumberId: account.phoneNumberId,
+        wabaId: account.wabaId,
+        whatsappVerified: true,
+        onboardingCompleted: true,
+        whatsappNumber: normalizedDisplay || undefined,
+        phone: normalizedDisplay || undefined,
+      },
+    });
+  }
+
+  private sanitizeAccount(account: {
+    id: string;
+    businessId: string;
+    phoneNumberId: string;
+    wabaId: string | null;
+    displayPhoneNumber: string | null;
+    status: WhatsAppConnectionStatus;
+    lastError: string | null;
+    lastWebhookAt?: Date | null;
+    connectedAt: Date | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }) {
+    return {
+      displayPhoneNumber: account.displayPhoneNumber,
+      phoneNumber: account.displayPhoneNumber,
+      status: account.status,
+      lastError: account.lastError
+        ? 'WhatsApp connection needs attention. Contact support if this persists.'
+        : null,
+      errorMessage: account.lastError
+        ? 'WhatsApp connection needs attention. Contact support if this persists.'
+        : null,
+      lastWebhookAt: account.lastWebhookAt ?? null,
+      lastCheckedAt: account.updatedAt,
+      connectedAt: account.connectedAt,
+      connected: account.status === WhatsAppConnectionStatus.CONNECTED,
+    };
+  }
+
   private async requireAccount(businessId: string) {
     const account = await this.prisma.whatsAppAccount.findUnique({
       where: { businessId },
@@ -511,7 +706,9 @@ export class WhatsAppService {
     if (!account) {
       throw new NotFoundException('WhatsApp is not connected for this business');
     }
+    if (account.status === WhatsAppConnectionStatus.DISCONNECTED) {
+      throw new BadRequestException('WhatsApp is disconnected for this business');
+    }
     return account;
   }
-
 }

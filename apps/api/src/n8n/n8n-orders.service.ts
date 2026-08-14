@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -116,6 +117,49 @@ export class N8nOrdersService {
         totalPrice: Number(item.totalPrice),
       })),
     };
+  }
+
+  async assertOrderBelongsToBusiness(orderId: string, businessId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, businessId: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    if (order.businessId !== businessId) {
+      throw new ForbiddenException('Order does not belong to this business');
+    }
+    return order;
+  }
+
+  async resolveScopedBusinessId(params: {
+    businessId?: string;
+    phoneNumberId?: string;
+  }): Promise<string> {
+    if (params.phoneNumberId?.trim()) {
+      const resolved = await this.findByWhatsAppPhoneNumberId(
+        params.phoneNumberId.trim(),
+      );
+      if (
+        params.businessId?.trim() &&
+        params.businessId.trim() !== resolved.businessId
+      ) {
+        throw new ForbiddenException(
+          'businessId does not match the WhatsApp phone_number_id tenant',
+        );
+      }
+      return resolved.businessId;
+    }
+
+    if (params.businessId?.trim()) {
+      await this.assertBusinessExists(params.businessId.trim());
+      return params.businessId.trim();
+    }
+
+    throw new BadRequestException(
+      'businessId or phoneNumberId is required for tenant scoping',
+    );
   }
 
   async assertBusinessExists(businessId: string) {
@@ -235,8 +279,11 @@ export class N8nOrdersService {
     };
   }
 
-  async getOrder(orderId: string) {
+  async getOrder(orderId: string, scopeBusinessId?: string) {
     const id = await this.resolveOrderId(orderId);
+    if (scopeBusinessId) {
+      await this.assertOrderBelongsToBusiness(id, scopeBusinessId);
+    }
     const order = await this.prisma.order.findUnique({
       where: { id },
       include: ORDER_INCLUDE,
@@ -288,7 +335,11 @@ export class N8nOrdersService {
     };
   }
 
-  async updateStatus(orderId: string, status: OrderStatus) {
+  async updateStatus(
+    orderId: string,
+    status: OrderStatus,
+    scopeBusinessId?: string,
+  ) {
     const id = await this.resolveOrderId(orderId);
     const existing = await this.prisma.order.findUnique({
       where: { id },
@@ -296,6 +347,9 @@ export class N8nOrdersService {
     });
     if (!existing) {
       throw new NotFoundException('Order not found');
+    }
+    if (scopeBusinessId && existing.businessId !== scopeBusinessId) {
+      throw new ForbiddenException('Order does not belong to this business');
     }
 
     try {

@@ -65,6 +65,7 @@ describe('N8nService', () => {
 
     const result = await service.triggerWorkflow({
       businessId: 'b1',
+      phoneNumberId: 'phone-1',
       customerPhone: '15551234567',
       messageBody: '2 lattes please',
     });

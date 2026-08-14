@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { apiPost, getFriendlyErrorMessage } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import type { OnboardingResult } from '@/types'
@@ -7,12 +8,14 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { EmbeddedSignupButton } from '@/components/whatsapp/EmbeddedSignupButton'
 import { CheckCircle2 } from 'lucide-react'
 
-type Step = 'business' | 'otp' | 'success'
+type Step = 'business' | 'otp' | 'whatsapp' | 'success'
 
 export function OnboardingPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { user, business, setBusiness, refreshMe } = useAuth()
   const [step, setStep] = useState<Step>('business')
   const [companyName, setCompanyName] = useState(business?.companyName || business?.name || '')
@@ -45,8 +48,7 @@ export function OnboardingPage() {
       if (result.requiresWhatsAppOtp) {
         setStep('otp')
       } else {
-        setStep('success')
-        await refreshMe()
+        setStep('whatsapp')
       }
     } catch (err) {
       setError(getFriendlyErrorMessage(err, 'Unable to save your business details.'))
@@ -68,13 +70,18 @@ export function OnboardingPage() {
         code: otp,
       })
       setBusiness(result)
-      await refreshMe()
-      setStep('success')
+      setStep('whatsapp')
     } catch (err) {
       setError(getFriendlyErrorMessage(err, 'Unable to verify your WhatsApp number.'))
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleWhatsAppConnected() {
+    await refreshMe()
+    void queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
+    setStep('success')
   }
 
   return (
@@ -89,7 +96,7 @@ export function OnboardingPage() {
             <CardHeader>
               <CardTitle className="text-xl">Tell Us About Your Business</CardTitle>
               <CardDescription>
-                Just a few details and you&apos;re ready to start managing your orders.
+                Enter your business name to get started. You&apos;ll connect WhatsApp next.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -123,6 +130,9 @@ export function OnboardingPage() {
                 >
                   {useDifferentNumber ? 'Use my signup number' : 'Use a different number'}
                 </button>
+                <p className="mt-2 text-xs text-muted">
+                  If you use a different number we&apos;ll verify it before WhatsApp connection.
+                </p>
               </div>
               {error ? (
                 <p className="text-sm text-danger" role="alert">
@@ -141,7 +151,7 @@ export function OnboardingPage() {
             <CardHeader>
               <CardTitle className="text-xl">Verify WhatsApp Number</CardTitle>
               <CardDescription>
-                Your WhatsApp number is being verified. Enter the code we sent to {displayWhatsApp}.
+                Enter the code we sent to {displayWhatsApp}.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -168,13 +178,33 @@ export function OnboardingPage() {
           </>
         ) : null}
 
+        {step === 'whatsapp' ? (
+          <>
+            <CardHeader>
+              <CardTitle className="text-xl">Connect your WhatsApp</CardTitle>
+              <CardDescription>
+                Link your WhatsApp Business Account and phone number through Meta. Ennitant never
+                stores your Meta password — only secure server-side credentials.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <EmbeddedSignupButton onConnected={() => void handleWhatsAppConnected()} />
+              {error ? (
+                <p className="text-sm text-danger" role="alert">
+                  {error}
+                </p>
+              ) : null}
+            </CardContent>
+          </>
+        ) : null}
+
         {step === 'success' ? (
           <>
             <CardHeader>
               <div className="flex items-center gap-3">
                 <CheckCircle2 className="h-8 w-8 text-success" aria-hidden />
                 <div>
-                  <CardTitle className="text-xl">WhatsApp connected successfully.</CardTitle>
+                  <CardTitle className="text-xl">WhatsApp connected successfully</CardTitle>
                   <CardDescription>You&apos;re ready to manage orders from your dashboard.</CardDescription>
                 </div>
               </div>

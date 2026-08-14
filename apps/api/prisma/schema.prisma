@@ -240,6 +240,10 @@ model WhatsAppAccount {
   lastError            String?
   lastWebhookAt        DateTime?
   connectedAt          DateTime?
+  tokenExpiresAt       DateTime?
+  connectedByUserId    String?
+  embeddedSignupAt     DateTime?
+  connectionMetadata   Json?
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
 }

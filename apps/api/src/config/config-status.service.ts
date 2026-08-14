@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isProduction } from '../common/env/production-guards';
 import { PrismaService } from '../prisma/prisma.service';
 import { OtpService } from '../otp/otp.service';
 
@@ -38,31 +39,37 @@ export class ConfigStatusService implements OnModuleInit {
         error instanceof Error ? error.message : 'Database unreachable';
     }
 
-    const metaToken = Boolean(
-      this.config.get('META_VERIFY_TOKEN') ||
-        this.config.get('WHATSAPP_ACCESS_TOKEN'),
-    );
+    const metaVerify = Boolean(this.config.get('META_VERIFY_TOKEN'));
     const metaSecret = Boolean(this.config.get('META_APP_SECRET'));
+    const metaAppId = Boolean(this.config.get('META_APP_ID'));
+    const embeddedConfig = Boolean(
+      this.config.get('META_EMBEDDED_SIGNUP_CONFIG_ID'),
+    );
     const n8nUrl = Boolean(this.config.get('N8N_BASE_URL'));
     const n8nSecret = Boolean(this.config.get('N8N_WEBHOOK_SECRET'));
 
     return {
       database: { ok: databaseOk, error: databaseError },
       whatsapp: {
-        configured: metaToken,
+        configured: metaVerify && metaAppId && embeddedConfig,
         signatureVerification: metaSecret,
-        hint: metaToken
+        embeddedSignup: embeddedConfig,
+        hint: metaVerify
           ? metaSecret
-            ? 'verify token + app secret present'
-            : 'verify token present; set META_APP_SECRET for signature checks'
-          : 'set META_VERIFY_TOKEN and connect a business WhatsApp number',
+            ? metaAppId && embeddedConfig
+              ? 'Embedded Signup ready'
+              : 'set META_APP_ID + META_EMBEDDED_SIGNUP_CONFIG_ID'
+            : isProduction(this.config)
+              ? 'META_APP_SECRET required in production'
+              : 'set META_APP_SECRET for signature checks'
+          : 'set META_VERIFY_TOKEN',
       },
       n8n: {
         configured: n8nUrl && n8nSecret,
         hint:
           n8nUrl && n8nSecret
             ? 'base URL + webhook secret present'
-            : 'set N8N_BASE_URL and N8N_WEBHOOK_SECRET (local parser fallback active if n8n down)',
+            : 'set N8N_BASE_URL and N8N_WEBHOOK_SECRET',
       },
       otp: this.otp.status,
     };

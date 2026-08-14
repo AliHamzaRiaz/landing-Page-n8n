@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -120,7 +120,7 @@ describe('WhatsAppService meta phone linking', () => {
     prisma.business.findFirst.mockResolvedValue({ id: 'other' });
     await expect(
       service.linkMetaPhoneNumberId('biz-my', '1192018783994580'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('returns null for unknown phone_number_id without display phone', async () => {

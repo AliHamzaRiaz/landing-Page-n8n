@@ -71,4 +71,29 @@ describe('WebhooksService', () => {
       service.verifySignature(Buffer.from('{}'), 'sha256=deadbeef'),
     ).toThrow(ForbiddenException);
   });
+
+  it('rejects unsigned webhooks in production when secret is missing', () => {
+    const prodConfig = {
+      getOrThrow: jest.fn((key: string) => configValues[key] ?? ''),
+      get: jest.fn((key: string) => {
+        if (key === 'NODE_ENV') return 'production';
+        if (key === 'META_APP_SECRET') return undefined;
+        return configValues[key];
+      }),
+    };
+
+    const prodService = new WebhooksService(
+      prodConfig as unknown as ConfigService,
+      {} as PrismaService,
+      {} as CustomersService,
+      {} as N8nService,
+      {} as WhatsAppService,
+      {} as NotificationsService,
+      {} as OrderIntakeService,
+    );
+
+    expect(() =>
+      prodService.verifySignature(Buffer.from('{}'), 'sha256=abc'),
+    ).toThrow(ForbiddenException);
+  });
 });

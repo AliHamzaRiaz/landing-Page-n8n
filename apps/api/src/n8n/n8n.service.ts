@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export interface TriggerWorkflowPayload {
   businessId: string;
+  phoneNumberId: string;
   customerPhone: string;
   customerName?: string | null;
   messageBody: string;

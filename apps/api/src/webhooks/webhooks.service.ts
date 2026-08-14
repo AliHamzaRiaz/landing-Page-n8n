@@ -12,6 +12,7 @@ import {
 } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { CustomersService } from '../customers/customers.service';
+import { isProduction } from '../common/env/production-guards';
 import { N8nService } from '../n8n/n8n.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderIntakeService } from '../orders/order-intake.service';
@@ -72,9 +73,12 @@ export class WebhooksService {
 
   verifySignature(rawBody: Buffer | string | undefined, signature?: string) {
     const appSecret = this.config.get<string>('META_APP_SECRET');
-    if (!appSecret) {
+    if (!appSecret?.trim()) {
+      if (isProduction(this.config)) {
+        throw new ForbiddenException('Webhook signature verification is not configured');
+      }
       this.logger.warn(
-        'META_APP_SECRET not set — skipping X-Hub-Signature-256 verification',
+        'META_APP_SECRET not set — skipping X-Hub-Signature-256 verification (dev only)',
       );
       return;
     }
@@ -101,6 +105,17 @@ export class WebhooksService {
     for (const entry of payload.entry ?? []) {
       for (const change of entry.changes ?? []) {
         const value = change.value;
+        const field = change.field;
+
+        if (field === 'account_update' || field === 'phone_number_name_update') {
+          await this.whatsappService.handleAccountUpdate({
+            wabaId: entry.id,
+            phoneNumberId: value?.metadata?.phone_number_id,
+            event: field,
+          });
+          continue;
+        }
+
         if (!value?.messages?.length) continue;
 
         const phoneNumberId = value.metadata?.phone_number_id;
@@ -157,6 +172,7 @@ export class WebhooksService {
           processed += 1;
           await this.processCustomerMessage({
             businessId,
+            phoneNumberId,
             customerId: customer.id,
             customerPhone: customer.phone,
             customerName: customer.name,
@@ -172,6 +188,7 @@ export class WebhooksService {
 
   private async processCustomerMessage(params: {
     businessId: string;
+    phoneNumberId: string;
     customerId: string;
     customerPhone: string;
     customerName?: string | null;
@@ -239,6 +256,7 @@ export class WebhooksService {
 
     const result = await this.n8nService.triggerWorkflow({
       businessId: params.businessId,
+      phoneNumberId: params.phoneNumberId,
       customerPhone: params.customerPhone,
       customerName: params.customerName,
       messageBody: params.body,

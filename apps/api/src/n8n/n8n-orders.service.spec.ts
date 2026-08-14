@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { OrderStatus } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { OrdersService } from '../orders/orders.service';
@@ -250,6 +250,21 @@ describe('N8nOrdersService', () => {
     await expect(
       service.updateStatus('o1', OrderStatus.DELIVERED),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('updateStatus rejects cross-tenant scope', async () => {
+    prisma.order.findUnique
+      .mockResolvedValueOnce({ id: 'o1' })
+      .mockResolvedValueOnce({
+        id: 'o1',
+        status: OrderStatus.PENDING,
+        confirmedAt: null,
+        businessId: 'biz-a',
+      });
+
+    await expect(
+      service.updateStatus('o1', OrderStatus.CONFIRMED, 'biz-b'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('listBusinessOrders filters and paginates', async () => {

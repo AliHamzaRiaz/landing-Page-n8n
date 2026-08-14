@@ -36,10 +36,13 @@ export class N8nController {
     @Body() dto: N8nCallbackDto,
   ) {
     this.n8nService.verifyWebhookSecret(secret);
-    await this.n8nOrders.assertBusinessExists(dto.businessId);
+    const businessId = await this.n8nOrders.resolveScopedBusinessId({
+      businessId: dto.businessId,
+      phoneNumberId: dto.phoneNumberId,
+    });
 
     const created = await this.orderIntake.createFromWhatsApp({
-      businessId: dto.businessId,
+      businessId,
       customerPhone: dto.customerPhone,
       customerName: dto.customerName,
       items: dto.items.map((item) => ({
@@ -90,7 +93,23 @@ export class N8nController {
     @Body() dto: N8nCallbackStatusDto,
   ) {
     this.n8nService.verifyWebhookSecret(secret);
-    const order = await this.n8nOrders.updateStatus(dto.orderId, dto.status);
+
+    let scopeBusinessId: string | undefined;
+    if (dto.phoneNumberId?.trim()) {
+      scopeBusinessId = await this.n8nOrders.resolveScopedBusinessId({
+        businessId: dto.businessId,
+        phoneNumberId: dto.phoneNumberId,
+      });
+    } else if (dto.businessId?.trim()) {
+      await this.n8nOrders.assertBusinessExists(dto.businessId);
+      scopeBusinessId = dto.businessId;
+    }
+
+    const order = await this.n8nOrders.updateStatus(
+      dto.orderId,
+      dto.status,
+      scopeBusinessId,
+    );
     return {
       success: true,
       message: 'Order status updated successfully',

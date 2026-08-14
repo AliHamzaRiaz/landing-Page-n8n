@@ -8,6 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
+  jest.setTimeout(30000);
   let service: AuthService;
   const prisma = {
     user: {

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { ConnectionCard } from '@/components/whatsapp/ConnectionCard'
+import { EmbeddedSignupButton } from '@/components/whatsapp/EmbeddedSignupButton'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { apiGet, apiPost, getFriendlyErrorMessage } from '@/lib/api'
@@ -37,6 +38,8 @@ export function WhatsAppPage() {
     onError: (err) => setError(getFriendlyErrorMessage(err, 'Unable to disconnect.')),
   })
 
+  const connected = statusQuery.data?.status === 'CONNECTED'
+
   return (
     <AppShell title="WhatsApp">
       <div className="space-y-6">
@@ -46,32 +49,54 @@ export function WhatsAppPage() {
             onRetry={() => void statusQuery.refetch()}
           />
         ) : (
-          <ConnectionCard
-            status={statusQuery.data}
-            loading={statusQuery.isLoading}
-            onTest={() => testMutation.mutate()}
-            onDisconnect={() => {
-              if (window.confirm('Disconnect WhatsApp from this business?')) {
-                disconnectMutation.mutate()
-              }
-            }}
-            testing={testMutation.isPending}
-            disconnecting={disconnectMutation.isPending}
-          />
+          <>
+            {!connected && !statusQuery.isLoading ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Connect WhatsApp</CardTitle>
+                  <CardDescription>
+                    Link your WhatsApp Business Account through Meta Embedded Signup. Each business
+                    uses its own phone number and credentials.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <EmbeddedSignupButton
+                    onConnected={() => {
+                      setMessage('WhatsApp connected successfully.')
+                      setError(null)
+                      void queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <ConnectionCard
+              status={statusQuery.data}
+              loading={statusQuery.isLoading}
+              onTest={() => testMutation.mutate()}
+              onDisconnect={() => {
+                if (window.confirm('Disconnect WhatsApp from this business?')) {
+                  disconnectMutation.mutate()
+                }
+              }}
+              testing={testMutation.isPending}
+              disconnecting={disconnectMutation.isPending}
+            />
+          </>
         )}
 
         <Card>
           <CardHeader>
-            <CardTitle>Your WhatsApp number</CardTitle>
+            <CardTitle>How it works</CardTitle>
             <CardDescription>
-              WhatsApp is connected during onboarding using your business number. You never need API
-              tokens or Meta IDs — Ennitant handles that behind the scenes.
+              Customer messages arrive via Meta webhooks and are routed to your business by phone
+              number ID. Outbound replies always use your connected WhatsApp account.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted">
-              To change your business WhatsApp number, update it in Settings or contact support.
-              Incoming customer messages are matched to your business automatically.
+              Access tokens are encrypted server-side and never shown in the dashboard.
             </p>
           </CardContent>
         </Card>

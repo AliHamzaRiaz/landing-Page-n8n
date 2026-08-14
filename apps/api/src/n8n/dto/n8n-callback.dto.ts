@@ -30,6 +30,10 @@ export class N8nCallbackDto {
   @IsString()
   businessId!: string;
 
+  @IsOptional()
+  @IsString()
+  phoneNumberId?: string;
+
   @IsString()
   customerPhone!: string;
 

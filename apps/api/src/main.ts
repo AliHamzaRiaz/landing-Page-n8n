@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { assertProductionSecrets } from './common/env/production-guards';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 
@@ -12,6 +13,7 @@ async function bootstrap() {
     rawBody: true,
   });
   const config = app.get(ConfigService);
+  assertProductionSecrets(config);
 
   const prefix = config.get<string>('API_PREFIX', 'api');
   app.setGlobalPrefix(prefix);

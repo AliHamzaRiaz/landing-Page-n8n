@@ -14,6 +14,7 @@ describe('N8nController S2S auth', () => {
   };
   const n8nOrders = {
     assertBusinessExists: jest.fn(),
+    resolveScopedBusinessId: jest.fn(),
     getOrder: jest.fn(),
     updateStatus: jest.fn(),
     listBusinessOrders: jest.fn(),
@@ -40,6 +41,9 @@ describe('N8nController S2S auth', () => {
     jest.resetAllMocks();
     n8nService.verifyWebhookSecret.mockImplementation(() => undefined);
     n8nOrders.assertBusinessExists.mockResolvedValue(undefined);
+    n8nOrders.resolveScopedBusinessId.mockImplementation(
+      async (params: { businessId?: string }) => params.businessId ?? 'biz-1',
+    );
     orderIntake.createFromWhatsApp.mockResolvedValue({ id: 'order-1' });
     n8nOrders.getOrder.mockResolvedValue(createdOrder);
     n8nService.markExecution.mockResolvedValue(null);
@@ -110,6 +114,7 @@ describe('N8nController S2S auth', () => {
     expect(n8nOrders.updateStatus).toHaveBeenCalledWith(
       'order-1',
       OrderStatus.CONFIRMED,
+      undefined,
     );
   });
 
@@ -128,6 +133,7 @@ describe('N8nController S2S auth', () => {
     expect(n8nOrders.updateStatus).toHaveBeenCalledWith(
       'order-1',
       OrderStatus.CANCELLED,
+      undefined,
     );
   });
 
@@ -221,7 +227,7 @@ describe('N8nController S2S auth', () => {
   });
 
   it('rejects callback with invalid businessId', async () => {
-    n8nOrders.assertBusinessExists.mockRejectedValue(
+    n8nOrders.resolveScopedBusinessId.mockRejectedValue(
       new NotFoundException('Business not found'),
     );
 

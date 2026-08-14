@@ -1,5 +1,5 @@
 import { OrderStatus } from '@prisma/client';
-import { IsEnum, IsString } from 'class-validator';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
 
 /**
  * n8n "Confirm/Cancel Order in Backend" body for PATCH /api/n8n/callback.
@@ -13,4 +13,12 @@ export class N8nCallbackStatusDto {
       'status must be one of PENDING, CONFIRMED, PROCESSING, DISPATCHED, SHIPPED, DELIVERED, CANCELLED',
   })
   status!: OrderStatus;
+
+  @IsOptional()
+  @IsString()
+  phoneNumberId?: string;
+
+  @IsOptional()
+  @IsString()
+  businessId?: string;
 }

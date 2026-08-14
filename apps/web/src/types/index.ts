@@ -163,6 +163,7 @@ export interface VendorPortalData {
 
 export interface OnboardingResult extends Business {
   requiresWhatsAppOtp?: boolean
+  requiresWhatsAppConnect?: boolean
   devCode?: string
 }
 

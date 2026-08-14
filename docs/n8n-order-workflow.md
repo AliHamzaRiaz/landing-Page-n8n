@@ -160,9 +160,14 @@ Output must look like:
 ```json
 {
   "orderId": "={{ $json.OrderId }}",
-  "status": "CONFIRMED"
+  "status": "CONFIRMED",
+  "phoneNumberId": "={{ $('WhatsApp Trigger').item.json.metadata.phone_number_id }}"
 }
 ```
+
+Include `phoneNumberId` from the **current** WhatsApp Trigger payload so the backend can verify tenant scope. Do not reuse a stale `phone_number_id` from the original Create Order execution.
+
+For cancel, use `"status": "CANCELLED"` with the same `orderId` and `phoneNumberId`.
 
 Do **not** use `$('Create Order in Backend').item.json.order.id` here unless that node is in the **same execution**. Button clicks start a **new** webhook execution — only the button payload carries the id.
 
