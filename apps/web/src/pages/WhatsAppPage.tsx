@@ -1,19 +1,19 @@
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { AppShell } from '@/components/layout/AppShell'
-import { ConnectionCard } from '@/components/whatsapp/ConnectionCard'
-import { CustomerChatQr } from '@/components/whatsapp/CustomerChatQr'
-import { EmbeddedSignupButton } from '@/components/whatsapp/EmbeddedSignupButton'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { useAuth } from '@/hooks/useAuth'
+import { WhatsAppSetupHub } from '@/components/whatsapp/WhatsAppSetupHub'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { apiGet, apiPost, getFriendlyErrorMessage } from '@/lib/api'
 import { toWaMeUrl } from '@/lib/whatsapp-link'
 import type { WhatsAppStatus } from '@/types'
 
 export function WhatsAppPage() {
+  const { user, business } = useAuth()
   const queryClient = useQueryClient()
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const initial = (user?.name || user?.phoneNumber || 'U').slice(0, 2).toUpperCase()
 
   const statusQuery = useQuery({
     queryKey: ['whatsapp-status'],
@@ -33,99 +33,69 @@ export function WhatsAppPage() {
   const disconnectMutation = useMutation({
     mutationFn: () => apiPost('/whatsapp/disconnect'),
     onSuccess: () => {
-      setMessage('WhatsApp disconnected.')
+      setMessage('WhatsApp disconnected. You can connect a different number.')
       setError(null)
       void queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
     },
     onError: (err) => setError(getFriendlyErrorMessage(err, 'Unable to disconnect.')),
   })
 
-  const connected = statusQuery.data?.status === 'CONNECTED'
   const phone = statusQuery.data?.phoneNumber || statusQuery.data?.displayPhoneNumber
   const chatUrl = statusQuery.data?.customerChatUrl || toWaMeUrl(phone)
 
   return (
-    <AppShell title="WhatsApp">
-      <div className="space-y-6">
-        {statusQuery.error ? (
+    <div className="min-h-screen bg-white">
+      <header className="flex items-center justify-between border-b border-slate-100 px-5 py-3 sm:px-8">
+        <div className="flex items-center gap-4">
+          <Link to="/dashboard" className="font-display text-lg font-bold tracking-tight text-slate-900">
+            Ennitant
+          </Link>
+          <Link to="/dashboard" className="text-sm text-slate-500 hover:text-slate-800">
+            Dashboard
+          </Link>
+        </div>
+        <div
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white"
+          title={business?.companyName || user?.name || 'Account'}
+        >
+          {initial}
+        </div>
+      </header>
+
+      {statusQuery.error ? (
+        <div className="mx-auto max-w-xl px-4 py-16">
           <ErrorState
             description={getFriendlyErrorMessage(statusQuery.error)}
             onRetry={() => void statusQuery.refetch()}
           />
-        ) : (
-          <>
-            {!connected && !statusQuery.isLoading ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Connect your WhatsApp</CardTitle>
-                  <CardDescription>
-                    Connect your WhatsApp Business account to start receiving and processing customer
-                    orders automatically.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm text-muted">
-                    You’ll sign in with Meta. If the number already uses the WhatsApp Business app and
-                    is eligible for Coexistence, Meta will show its official QR for you to scan in
-                    the app. Otherwise Meta will verify the number with the standard Embedded Signup
-                    flow.
-                  </p>
-                  <EmbeddedSignupButton
-                    onConnected={() => {
-                      setMessage('WhatsApp connected successfully.')
-                      setError(null)
-                      void queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
-                    }}
-                  />
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {connected && chatUrl ? (
-              <CustomerChatQr chatUrl={chatUrl} phone={phone} />
-            ) : null}
-
-            <ConnectionCard
-              status={statusQuery.data}
-              loading={statusQuery.isLoading}
-              onTest={() => testMutation.mutate()}
-              onDisconnect={() => {
-                if (window.confirm('Disconnect WhatsApp from this business?')) {
-                  disconnectMutation.mutate()
-                }
-              }}
-              testing={testMutation.isPending}
-              disconnecting={disconnectMutation.isPending}
-            />
-          </>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle>How it works</CardTitle>
-            <CardDescription>
-              Customer messages arrive via Meta webhooks and are routed to your business by phone
-              number ID. Outbound replies always use your connected WhatsApp account.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted">
-              Access tokens are encrypted server-side and never shown in the dashboard.
-            </p>
-          </CardContent>
-        </Card>
-
-        {message ? (
-          <p className="text-sm text-success" role="status">
-            {message}
-          </p>
-        ) : null}
-        {error ? (
-          <p className="text-sm text-danger" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    </AppShell>
+        </div>
+      ) : (
+        <WhatsAppSetupHub
+          status={statusQuery.data}
+          loading={statusQuery.isLoading}
+          chatUrl={chatUrl}
+          phone={phone}
+          message={message}
+          error={error}
+          onConnected={() => {
+            setMessage('WhatsApp connected successfully.')
+            setError(null)
+            void queryClient.invalidateQueries({ queryKey: ['whatsapp-status'] })
+          }}
+          onTest={() => testMutation.mutate()}
+          onDisconnect={() => {
+            if (
+              window.confirm(
+                'Disconnect WhatsApp from this business? You can connect a different number after that.',
+              )
+            ) {
+              disconnectMutation.mutate()
+            }
+          }}
+          testing={testMutation.isPending}
+          disconnecting={disconnectMutation.isPending}
+        />
+      )}
+    </div>
   )
 }

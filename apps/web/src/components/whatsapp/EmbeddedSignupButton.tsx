@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
+import { cn } from '@/lib/utils'
 import { apiGet, apiPost, getFriendlyErrorMessage } from '@/lib/api'
 import {
   isCoexistenceFinish,
@@ -19,10 +20,14 @@ export function EmbeddedSignupButton({
   onConnected,
   disabled,
   className,
+  buttonClassName,
+  children,
 }: {
   onConnected?: () => void
   disabled?: boolean
   className?: string
+  buttonClassName?: string
+  children?: ReactNode
 }) {
   const [loading, setLoading] = useState(false)
   const [hint, setHint] = useState<string | null>(null)
@@ -108,12 +113,12 @@ export function EmbeddedSignupButton({
     <div className={className}>
       <Button
         type="button"
-        className="w-full sm:w-auto"
+        className={cn('w-full sm:w-auto', buttonClassName)}
         loading={loading}
         disabled={disabled || loading}
         onClick={() => void connect()}
       >
-        Connect WhatsApp
+        {children ?? 'Connect WhatsApp'}
       </Button>
       {hint && !error ? (
         <p className="mt-3 text-sm text-muted" role="status">

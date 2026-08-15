@@ -6,6 +6,7 @@ import { MobileNav } from '@/components/layout/MobileNav'
 
 function pageFromPath(pathname: string) {
   if (pathname.startsWith('/orders')) return 'orders'
+  if (pathname.startsWith('/whatsapp')) return 'whatsapp'
   if (pathname.startsWith('/settings')) return 'settings'
   if (pathname.startsWith('/dashboard')) return 'dashboard'
   return 'dashboard'

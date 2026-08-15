@@ -6,9 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 export function CustomerChatQr({
   chatUrl,
   phone,
+  embedded = false,
 }: {
   chatUrl: string
   phone?: string | null
+  embedded?: boolean
 }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
 
@@ -26,6 +28,32 @@ export function CustomerChatQr({
     }
   }, [chatUrl])
 
+  const body = (
+    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        {dataUrl ? (
+          <img src={dataUrl} alt="QR code to chat on WhatsApp" width={200} height={200} />
+        ) : (
+          <div className="skeleton h-[200px] w-[200px]" />
+        )}
+      </div>
+      <div className="space-y-3 text-center sm:text-left">
+        <p className="text-sm font-medium">Scan to chat with us</p>
+        {phone ? <p className="text-sm text-muted">{phone}</p> : null}
+        <p className="text-xs text-muted">
+          This QR opens a customer chat with your number. It is not Meta’s onboarding QR.
+        </p>
+        <Button type="button" onClick={() => window.open(chatUrl, '_blank', 'noopener,noreferrer')}>
+          Open WhatsApp
+        </Button>
+      </div>
+    </div>
+  )
+
+  if (embedded) {
+    return body
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -35,25 +63,7 @@ export function CustomerChatQr({
           onboarding QR.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-          {dataUrl ? (
-            <img src={dataUrl} alt="QR code to chat on WhatsApp" width={200} height={200} />
-          ) : (
-            <div className="skeleton h-[200px] w-[200px]" />
-          )}
-        </div>
-        <div className="space-y-3 text-center sm:text-left">
-          <p className="text-sm font-medium">Scan to chat with us</p>
-          {phone ? <p className="text-sm text-muted">{phone}</p> : null}
-          <Button
-            type="button"
-            onClick={() => window.open(chatUrl, '_blank', 'noopener,noreferrer')}
-          >
-            Open WhatsApp
-          </Button>
-        </div>
-      </CardContent>
+      <CardContent>{body}</CardContent>
     </Card>
   )
 }

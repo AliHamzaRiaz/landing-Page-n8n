@@ -338,6 +338,17 @@ textarea {
     linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 45%, #f8fafc 100%);
 }
 
+.app-shell[data-page='whatsapp'] {
+  --brand: #0891b2;
+  --brand-dark: #0e7490;
+  --page-accent: #0891b2;
+  --ring: rgba(8, 145, 178, 0.28);
+  background-image:
+    radial-gradient(ellipse 70% 45% at 90% -10%, rgba(8, 145, 178, 0.16), transparent 55%),
+    radial-gradient(ellipse 45% 35% at 0% 15%, rgba(16, 185, 129, 0.1), transparent 50%),
+    linear-gradient(180deg, #ecfeff 0%, #e0f2fe 45%, #f8fafc 100%);
+}
+
 .app-shell[data-page='settings'] {
   --brand: #7c3aed;
   --brand-dark: #6d28d9;
