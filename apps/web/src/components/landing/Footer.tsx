@@ -15,6 +15,7 @@ const columns = [
     links: [
       { label: 'Login', href: '/login' },
       { label: 'Get Started', href: '/signup' },
+      { label: 'Privacy Policy', href: '/privacy-policy' },
     ],
   },
 ]
@@ -62,7 +63,10 @@ export function Footer() {
         ))}
       </div>
       <div className="border-t border-white/10 px-4 py-5 text-center text-xs text-teal-200/70 sm:px-6">
-        © {new Date().getFullYear()} Ennitant. All rights reserved.
+        © {new Date().getFullYear()} Ennitant. All rights reserved.{' '}
+        <Link to="/privacy-policy" className="text-teal-100 underline-offset-2 hover:text-white hover:underline focus-ring rounded">
+          Privacy Policy
+        </Link>
       </div>
     </footer>
   )

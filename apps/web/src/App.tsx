@@ -20,6 +20,7 @@ import { WhatsAppPage } from '@/pages/WhatsAppPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { CustomerOrderPage } from '@/pages/CustomerOrderPage'
 import { VendorPortalPage } from '@/pages/VendorPortalPage'
+import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,15 +63,8 @@ export default function App() {
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
 
-            <Route
-              path="/privacy"
-              element={
-                <LegalPage
-                  title="Privacy Policy"
-                  body="Ennitant collects only the account, business, and order data needed to operate WhatsApp order management. We do not sell customer data."
-                />
-              }
-            />
+            <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+            <Route path="/privacy" element={<Navigate to="/privacy-policy" replace />} />
             <Route
               path="/terms"
               element={
