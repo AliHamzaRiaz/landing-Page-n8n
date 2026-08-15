@@ -170,10 +170,15 @@ export interface OnboardingResult extends Business {
 export interface WhatsAppStatus {
   status: WhatsAppConnectionStatus
   phoneNumber?: string | null
+  displayPhoneNumber?: string | null
   displayName?: string | null
   lastCheckedAt?: string | null
   connectedAt?: string | null
   errorMessage?: string | null
+  connected?: boolean
+  customerChatUrl?: string | null
+  onboardingPath?: string | null
+  isOnWhatsAppBusinessApp?: boolean
 }
 
 export interface Notification {

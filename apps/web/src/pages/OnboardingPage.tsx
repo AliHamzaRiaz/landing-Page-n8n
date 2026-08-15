@@ -183,8 +183,9 @@ export function OnboardingPage() {
             <CardHeader>
               <CardTitle className="text-xl">Connect your WhatsApp</CardTitle>
               <CardDescription>
-                Link your WhatsApp Business Account and phone number through Meta. Ennitant never
-                stores your Meta password — only secure server-side credentials.
+                Link your WhatsApp Business Account through Meta. If the number already uses the
+                WhatsApp Business app, Meta may show its official QR for you to scan. Keep this
+                window open until Meta finishes.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

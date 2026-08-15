@@ -24,7 +24,22 @@ Ennitant code is implemented end-to-end. Live WhatsApp delivery and production O
    - Verify token: same as `META_VERIFY_TOKEN`
 3. Subscribe to `messages` and `account_update`.
 
-Business owners connect WhatsApp via **Connect WhatsApp** (Embedded Signup) — no manual token entry.
+Business owners connect WhatsApp via **Connect WhatsApp** (Embedded Signup) — no manual token, WABA ID, or phone number ID entry.
+
+### Coexistence vs customer QR
+
+| QR | Source | Purpose |
+|----|--------|---------|
+| Meta onboarding QR | Official Facebook Embedded Signup popup | Link WhatsApp Business app to Cloud API (Coexistence, if eligible) |
+| Customer chat QR | Ennitant dashboard after CONNECTED | Shoppers open `wa.me` chat |
+
+Ennitant does **not** generate Meta’s onboarding QR.
+
+### App Review
+
+Live-mode Embedded Signup requires Advanced Access on WhatsApp permissions. Until App Review is approved, only Meta app roles can complete the flow.
+
+Subscribe to `messages` and `account_update`.
 
 ## 2) Public HTTPS for the API
 
@@ -68,7 +83,7 @@ Until a real SMS/WhatsApp OTP provider is wired, keep `OTP_PROVIDER=console` and
 | What | Env var |
 |------|---------|
 | JWT signing | `JWT_SECRET` (long random) |
-| Token encryption | `ENCRYPTION_KEY` (optional; 64 hex chars recommended) |
+| Token encryption | `ENCRYPTION_KEY` (**required in production**; 64 hex chars) |
 | Frontend URL (share links) | `FRONTEND_URL=http://localhost:5173` |
 
 ## Developer health check

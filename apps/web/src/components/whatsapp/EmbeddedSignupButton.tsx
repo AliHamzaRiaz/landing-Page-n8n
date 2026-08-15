@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { Button } from '@/components/ui/Button'
 import { apiGet, apiPost, getFriendlyErrorMessage } from '@/lib/api'
 import {
+  isCoexistenceFinish,
   launchEmbeddedSignup,
-  listenForEmbeddedSignupSession,
+  listenForEmbeddedSignupEvents,
   loadFacebookSdk,
+  type EmbeddedSignupEvent,
   type EmbeddedSignupSession,
 } from '@/lib/meta-sdk'
 
@@ -23,19 +25,26 @@ export function EmbeddedSignupButton({
   className?: string
 }) {
   const [loading, setLoading] = useState(false)
+  const [hint, setHint] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const sessionRef = useRef<EmbeddedSignupSession | null>(null)
+  const lastEventRef = useRef<EmbeddedSignupEvent | null>(null)
   const configRef = useRef<EmbeddedSignupConfig | null>(null)
 
   useEffect(() => {
-    const stopListening = listenForEmbeddedSignupSession((session) => {
-      sessionRef.current = session
+    return listenForEmbeddedSignupEvents((event) => {
+      lastEventRef.current = event
+      if (event.kind === 'session') {
+        sessionRef.current = event.session
+      }
     })
-    return stopListening
   }, [])
 
   const connect = useCallback(async () => {
     setError(null)
+    setHint(
+      'Keep this window open. If Meta asks you to scan a QR, use the WhatsApp Business app. That QR is Meta’s official onboarding QR — not your customer chat QR.',
+    )
     setLoading(true)
     sessionRef.current = null
 
@@ -47,19 +56,44 @@ export function EmbeddedSignupButton({
 
       await loadFacebookSdk(config.appId)
 
-      const fbResponse = await launchEmbeddedSignup(config.configId)
-      const code = fbResponse.authResponse?.code
+      let code: string | undefined
+      let usedCoexistence = true
+
+      try {
+        const fbResponse = await launchEmbeddedSignup(config.configId, 'coexistence')
+        code = fbResponse.authResponse?.code
+      } catch (coexistError) {
+        const lastEvent = lastEventRef.current
+        const shouldFallback =
+          lastEvent?.kind === 'error' && Boolean(lastEvent.coexistenceUnavailable)
+        if (!shouldFallback) {
+          throw coexistError
+        }
+        usedCoexistence = false
+        setHint('This number is not eligible for WhatsApp Business App Coexistence. Continuing with standard Meta verification.')
+        sessionRef.current = null
+        const fbResponse = await launchEmbeddedSignup(config.configId, 'standard')
+        code = fbResponse.authResponse?.code
+      }
+
       if (!code) {
         throw new Error('Meta did not return an authorization code')
       }
 
-      const resolvedSession = await waitForEmbeddedSignupSession(sessionRef, 3000)
+      const session = await waitForEmbeddedSignupSession(sessionRef, 8000)
+      const onboardingPath =
+        usedCoexistence && isCoexistenceFinish(session.event)
+          ? 'coexistence'
+          : usedCoexistence && !session.phoneNumberId
+            ? 'coexistence'
+            : 'embedded_signup'
 
       await apiPost('/whatsapp/embedded-signup/complete', {
         code,
-        wabaId: resolvedSession.wabaId,
-        phoneNumberId: resolvedSession.phoneNumberId,
-        displayPhoneNumber: resolvedSession.displayPhoneNumber,
+        wabaId: session.wabaId,
+        phoneNumberId: session.phoneNumberId,
+        displayPhoneNumber: session.displayPhoneNumber,
+        onboardingPath,
       })
 
       onConnected?.()
@@ -81,6 +115,11 @@ export function EmbeddedSignupButton({
       >
         Connect WhatsApp
       </Button>
+      {hint && !error ? (
+        <p className="mt-3 text-sm text-muted" role="status">
+          {hint}
+        </p>
+      ) : null}
       {error ? (
         <p className="mt-2 text-sm text-danger" role="alert">
           {error}
@@ -97,7 +136,7 @@ async function waitForEmbeddedSignupSession(
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const current = sessionRef.current
-    if (current?.wabaId && current.phoneNumberId) {
+    if (current?.wabaId) {
       return current
     }
     await new Promise((resolve) => setTimeout(resolve, 150))

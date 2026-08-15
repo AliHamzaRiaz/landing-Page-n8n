@@ -1,3 +1,24 @@
+export type FbLoginResponse = {
+  authResponse?: {
+    code?: string
+    accessToken?: string
+    userID?: string
+  }
+  status?: string
+}
+
+export type EmbeddedSignupSession = {
+  wabaId: string
+  phoneNumberId?: string
+  displayPhoneNumber?: string
+  event?: string
+}
+
+export type EmbeddedSignupEvent =
+  | { kind: 'session'; session: EmbeddedSignupSession }
+  | { kind: 'cancel'; message?: string }
+  | { kind: 'error'; message: string; coexistenceUnavailable?: boolean }
+
 declare global {
   interface Window {
     FB?: {
@@ -16,25 +37,13 @@ declare global {
   }
 }
 
-export type FbLoginResponse = {
-  authResponse?: {
-    code?: string
-    accessToken?: string
-    userID?: string
-  }
-  status?: string
-}
-
-export type EmbeddedSignupSession = {
-  wabaId: string
-  phoneNumberId: string
-  displayPhoneNumber?: string
-}
-
 const SDK_URL = 'https://connect.facebook.net/en_US/sdk.js'
-const GRAPH_VERSION = 'v21.0'
 
 let sdkPromise: Promise<void> | null = null
+
+function graphVersion(): string {
+  return 'v21.0'
+}
 
 export function loadFacebookSdk(appId: string): Promise<void> {
   if (typeof window === 'undefined') {
@@ -42,7 +51,12 @@ export function loadFacebookSdk(appId: string): Promise<void> {
   }
 
   if (window.FB) {
-    window.FB.init({ appId, cookie: true, xfbml: false, version: GRAPH_VERSION })
+    window.FB.init({
+      appId,
+      cookie: true,
+      xfbml: false,
+      version: graphVersion(),
+    })
     return Promise.resolve()
   }
 
@@ -50,7 +64,12 @@ export function loadFacebookSdk(appId: string): Promise<void> {
 
   sdkPromise = new Promise((resolve, reject) => {
     window.fbAsyncInit = () => {
-      window.FB?.init({ appId, cookie: true, xfbml: false, version: GRAPH_VERSION })
+      window.FB?.init({
+        appId,
+        cookie: true,
+        xfbml: false,
+        version: graphVersion(),
+      })
       resolve()
     }
 
@@ -75,47 +94,70 @@ export function loadFacebookSdk(appId: string): Promise<void> {
   return sdkPromise
 }
 
-export function listenForEmbeddedSignupSession(
-  onSession: (session: EmbeddedSignupSession) => void,
-): () => void {
-  function handler(event: MessageEvent) {
-    if (
-      event.origin !== 'https://www.facebook.com' &&
-      event.origin !== 'https://web.facebook.com'
-    ) {
-      return
-    }
-
-    try {
-      const payload =
-        typeof event.data === 'string' ? JSON.parse(event.data) : event.data
-      if (payload?.type !== 'WA_EMBEDDED_SIGNUP') return
-
-      const data = payload.data ?? payload.payload ?? payload
-      const wabaId = data.waba_id ?? data.wabaId
-      const phoneNumberId = data.phone_number_id ?? data.phoneNumberId
-      const displayPhoneNumber =
-        data.display_phone_number ?? data.displayPhoneNumber
-
-      if (!wabaId || !phoneNumberId) return
-
-      onSession({
-        wabaId: String(wabaId),
-        phoneNumberId: String(phoneNumberId),
-        displayPhoneNumber: displayPhoneNumber
-          ? String(displayPhoneNumber)
-          : undefined,
-      })
-    } catch {
-      // ignore non-JSON postMessage noise
-    }
+function parseEmbeddedMessage(event: MessageEvent): EmbeddedSignupEvent | null {
+  if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') {
+    return null
   }
 
+  try {
+    const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data
+    if (payload?.type !== 'WA_EMBEDDED_SIGNUP') return null
+
+    const eventName = String(payload.event ?? payload.data?.event ?? '')
+    const data = payload.data ?? payload.payload ?? {}
+    const errorMessage = String(
+      data.error_message ?? data.errorMessage ?? data.current_step ?? payload.error_message ?? '',
+    )
+    const lower = `${eventName} ${errorMessage}`.toLowerCase()
+    const coexistenceUnavailable =
+      lower.includes('coexist') ||
+      lower.includes('whatsapp_business_app_onboarding') && lower.includes('not')
+
+    if (eventName === 'CANCEL') {
+      return { kind: 'cancel', message: errorMessage || 'WhatsApp connection was cancelled' }
+    }
+    if (eventName === 'ERROR') {
+      return {
+        kind: 'error',
+        message: errorMessage || 'Meta could not complete WhatsApp onboarding.',
+        coexistenceUnavailable,
+      }
+    }
+
+    const wabaId = data.waba_id ?? data.wabaId
+    const phoneNumberId = data.phone_number_id ?? data.phoneNumberId
+    const displayPhoneNumber = data.display_phone_number ?? data.displayPhoneNumber
+    if (!wabaId) return null
+
+    return {
+      kind: 'session',
+      session: {
+        wabaId: String(wabaId),
+        phoneNumberId: phoneNumberId ? String(phoneNumberId) : undefined,
+        displayPhoneNumber: displayPhoneNumber ? String(displayPhoneNumber) : undefined,
+        event: eventName,
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
+export function listenForEmbeddedSignupEvents(
+  onEvent: (event: EmbeddedSignupEvent) => void,
+): () => void {
+  function handler(event: MessageEvent) {
+    const parsed = parseEmbeddedMessage(event)
+    if (parsed) onEvent(parsed)
+  }
   window.addEventListener('message', handler)
   return () => window.removeEventListener('message', handler)
 }
 
-export function launchEmbeddedSignup(configId: string): Promise<FbLoginResponse> {
+export function launchEmbeddedSignup(
+  configId: string,
+  path: 'standard' | 'coexistence',
+): Promise<FbLoginResponse> {
   return new Promise((resolve, reject) => {
     if (!window.FB) {
       reject(new Error('Facebook SDK not loaded'))
@@ -138,12 +180,22 @@ export function launchEmbeddedSignup(configId: string): Promise<FbLoginResponse>
         config_id: configId,
         response_type: 'code',
         override_default_response_type: true,
-        extras: {
-          setup: {},
-          featureType: '',
-          sessionInfoVersion: '3',
-        },
+        extras:
+          path === 'coexistence'
+            ? {
+                setup: {},
+                featureType: 'whatsapp_business_app_onboarding',
+                sessionInfoVersion: '3',
+              }
+            : {
+                setup: {},
+                sessionInfoVersion: '3',
+              },
       },
     )
   })
+}
+
+export function isCoexistenceFinish(event?: string): boolean {
+  return event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'
 }

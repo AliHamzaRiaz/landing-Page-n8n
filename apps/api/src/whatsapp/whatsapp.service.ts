@@ -1,6 +1,7 @@
 import {
   BadRequestException,
-  ConflictException,
+  ForbiddenException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -23,7 +24,11 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectWhatsAppDto } from './dto/connect-whatsapp.dto';
 import { EmbeddedSignupCompleteDto } from './dto/embedded-signup-complete.dto';
-import { MetaWhatsAppClient } from './meta-whatsapp.client';
+import { MetaApiError, MetaWhatsAppClient } from './meta-whatsapp.client';
+import {
+  WhatsAppErrorCode,
+  whatsappError,
+} from './whatsapp-onboarding.errors';
 
 @Injectable()
 export class WhatsAppService {
@@ -48,7 +53,12 @@ export class WhatsAppService {
       );
     }
 
-    return { appId, configId };
+    return {
+      appId,
+      configId,
+      graphVersion: this.config.get<string>('META_GRAPH_API_VERSION', 'v21.0'),
+      coexistenceSupported: true,
+    };
   }
 
   async completeEmbeddedSignup(
@@ -56,10 +66,8 @@ export class WhatsAppService {
     userId: string,
     dto: EmbeddedSignupCompleteDto,
   ) {
-    const phoneNumberId = dto.phoneNumberId.trim();
     const wabaId = dto.wabaId.trim();
-
-    await this.assertPhoneNumberIdAvailable(businessId, phoneNumberId);
+    const onboardingPath = dto.onboardingPath ?? 'embedded_signup';
 
     let accessToken: string;
     let tokenExpiresAt: Date | null = null;
@@ -74,36 +82,136 @@ export class WhatsAppService {
       this.logger.warn(
         `Embedded Signup token exchange failed for businessId=${businessId}`,
       );
-      throw new BadRequestException(
-        'Unable to complete WhatsApp connection with Meta. Please try again.',
+      await this.recordConnectionError(
+        businessId,
+        userId,
+        'Meta authorization failed',
       );
+      throw this.mapMetaError(error, WhatsAppErrorCode.META_AUTHORIZATION_FAILED);
     }
 
-    const validation = await this.meta.validateCredentials({
-      phoneNumberId,
-      accessToken,
-    });
+    try {
+      await this.meta.getWaba(wabaId, accessToken);
+    } catch (error) {
+      await this.recordConnectionError(
+        businessId,
+        userId,
+        'WhatsApp Business Account was not found',
+      );
+      throw this.mapMetaError(error, WhatsAppErrorCode.WABA_NOT_FOUND);
+    }
+
+    let phoneNumberId: string;
+    let displayPhoneNumber: string | null = dto.displayPhoneNumber?.trim() || null;
+
+    try {
+      const resolved = await this.resolveAuthorizedPhone({
+        wabaId,
+        accessToken,
+        sessionPhoneNumberId: dto.phoneNumberId?.trim(),
+      });
+      phoneNumberId = resolved.phoneNumberId;
+      displayPhoneNumber =
+        displayPhoneNumber || resolved.displayPhoneNumber || null;
+    } catch (error) {
+      await this.recordConnectionError(
+        businessId,
+        userId,
+        'WhatsApp phone number was not found',
+      );
+      if (error instanceof HttpException) throw error;
+      throw this.mapMetaError(error, WhatsAppErrorCode.PHONE_NUMBER_NOT_FOUND);
+    }
+
+    await this.assertPhoneNumberIdAvailable(businessId, phoneNumberId);
+
+    let validation;
+    try {
+      validation = await this.meta.validateCredentials({
+        phoneNumberId,
+        accessToken,
+      });
+    } catch (error) {
+      await this.persistErrorAccount({
+        businessId,
+        userId,
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber,
+        accessToken,
+        tokenExpiresAt,
+        onboardingPath,
+        lastError: 'Meta phone validation timed out',
+      });
+      throw this.mapMetaError(error, WhatsAppErrorCode.META_API_TIMEOUT);
+    }
 
     if (!validation.ok) {
-      throw new BadRequestException(
-        'Meta rejected the WhatsApp credentials. Ensure the phone number is fully registered.',
-      );
+      await this.persistErrorAccount({
+        businessId,
+        userId,
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber,
+        accessToken,
+        tokenExpiresAt,
+        onboardingPath,
+        lastError: 'Meta rejected the WhatsApp phone credentials',
+      });
+      throw whatsappError(WhatsAppErrorCode.PHONE_VERIFICATION_FAILED);
     }
 
-    const subscribed = await this.meta.subscribeWaba(wabaId, accessToken);
+    displayPhoneNumber =
+      displayPhoneNumber || validation.displayPhoneNumber || null;
+
+    let subscribed: boolean;
+    try {
+      subscribed = await this.meta.subscribeWaba(wabaId, accessToken);
+    } catch (error) {
+      await this.persistErrorAccount({
+        businessId,
+        userId,
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber,
+        accessToken,
+        tokenExpiresAt,
+        onboardingPath,
+        lastError: 'Webhook subscription timed out',
+        isOnBizApp: validation.isOnBizApp,
+        platformType: validation.platformType,
+        verifiedName: validation.verifiedName,
+      });
+      throw this.mapMetaError(error, WhatsAppErrorCode.META_API_TIMEOUT);
+    }
+
     if (!subscribed) {
-      throw new BadRequestException(
-        'Connected to Meta but webhook subscription failed. Contact support.',
-      );
+      await this.persistErrorAccount({
+        businessId,
+        userId,
+        phoneNumberId,
+        wabaId,
+        displayPhoneNumber,
+        accessToken,
+        tokenExpiresAt,
+        onboardingPath,
+        lastError: 'Webhook subscription failed',
+        isOnBizApp: validation.isOnBizApp,
+        platformType: validation.platformType,
+        verifiedName: validation.verifiedName,
+      });
+      throw whatsappError(WhatsAppErrorCode.WEBHOOK_SUBSCRIBE_FAILED);
     }
-
-    const displayPhoneNumber =
-      dto.displayPhoneNumber?.trim() ||
-      validation.displayPhoneNumber ||
-      null;
 
     const encrypted = encryptSecret(accessToken, encryptionSecret(this.config));
     const now = new Date();
+    const metadata = {
+      verifiedName: validation.verifiedName ?? null,
+      wabaId,
+      onboardingPath,
+      isOnBizApp: validation.isOnBizApp ?? null,
+      platformType: validation.platformType ?? null,
+    } as Prisma.InputJsonValue;
 
     const account = await this.prisma.whatsAppAccount.upsert({
       where: { businessId },
@@ -119,10 +227,7 @@ export class WhatsAppService {
         embeddedSignupAt: now,
         connectedByUserId: userId,
         tokenExpiresAt,
-        connectionMetadata: {
-          verifiedName: validation.verifiedName ?? null,
-          wabaId,
-        } as Prisma.InputJsonValue,
+        connectionMetadata: metadata,
       },
       update: {
         phoneNumberId,
@@ -135,10 +240,7 @@ export class WhatsAppService {
         embeddedSignupAt: now,
         connectedByUserId: userId,
         tokenExpiresAt,
-        connectionMetadata: {
-          verifiedName: validation.verifiedName ?? null,
-          wabaId,
-        } as Prisma.InputJsonValue,
+        connectionMetadata: metadata,
       },
     });
 
@@ -155,6 +257,7 @@ export class WhatsAppService {
           phoneNumberId,
           wabaId,
           displayPhoneNumber,
+          onboardingPath,
         },
       },
     });
@@ -166,6 +269,11 @@ export class WhatsAppService {
   }
 
   async connect(businessId: string, dto: ConnectWhatsAppDto) {
+    if (!isPlatformFallbackEnabled(this.config)) {
+      throw new ForbiddenException(
+        'Manual WhatsApp token connect is disabled. Use Connect WhatsApp (Meta Embedded Signup).',
+      );
+    }
     const validation = await this.meta.validateCredentials({
       phoneNumberId: dto.phoneNumberId,
       accessToken: dto.accessToken,
@@ -186,6 +294,8 @@ export class WhatsAppService {
       ? WhatsAppConnectionStatus.CONNECTED
       : WhatsAppConnectionStatus.ERROR;
 
+    const validatedDisplay =
+      validation.ok ? validation.displayPhoneNumber : undefined;
     const encrypted = encryptSecret(
       dto.accessToken,
       encryptionSecret(this.config),
@@ -198,9 +308,7 @@ export class WhatsAppService {
         phoneNumberId: dto.phoneNumberId.trim(),
         wabaId: dto.wabaId?.trim(),
         displayPhoneNumber:
-          dto.displayPhoneNumber?.trim() ||
-          validation.displayPhoneNumber ||
-          null,
+          dto.displayPhoneNumber?.trim() || validatedDisplay || null,
         accessTokenEncrypted: encrypted,
         status,
         lastError: validation.ok ? null : 'Meta credential validation failed',
@@ -210,9 +318,7 @@ export class WhatsAppService {
         phoneNumberId: dto.phoneNumberId.trim(),
         wabaId: dto.wabaId?.trim(),
         displayPhoneNumber:
-          dto.displayPhoneNumber?.trim() ||
-          validation.displayPhoneNumber ||
-          undefined,
+          dto.displayPhoneNumber?.trim() || validatedDisplay || undefined,
         accessTokenEncrypted: encrypted,
         status,
         lastError: validation.ok ? null : 'Meta credential validation failed',
@@ -386,6 +492,13 @@ export class WhatsAppService {
     }
 
     const business = matches[0];
+    const existing = await this.prisma.whatsAppAccount.findUnique({
+      where: { businessId: business.id },
+      select: { status: true },
+    });
+    if (existing?.status === WhatsAppConnectionStatus.DISCONNECTED) {
+      return null;
+    }
     await this.linkMetaPhoneNumberId(
       business.id,
       phoneNumberId,
@@ -483,6 +596,7 @@ export class WhatsAppService {
       where: { businessId },
       data: {
         status: WhatsAppConnectionStatus.DISCONNECTED,
+        phoneNumberId: `disconnected:${account.id}`,
         accessTokenEncrypted: encryptSecret(
           'revoked',
           encryptionSecret(this.config),
@@ -602,9 +716,7 @@ export class WhatsAppService {
       select: { id: true },
     });
     if (conflictBusiness) {
-      throw new ConflictException(
-        'This WhatsApp phone number is already connected to another business',
-      );
+      throw whatsappError(WhatsAppErrorCode.PHONE_ALREADY_CONNECTED);
     }
 
     const conflictAccount = await this.prisma.whatsAppAccount.findFirst({
@@ -615,9 +727,7 @@ export class WhatsAppService {
       select: { id: true },
     });
     if (conflictAccount) {
-      throw new ConflictException(
-        'This WhatsApp phone number is already connected to another business',
-      );
+      throw whatsappError(WhatsAppErrorCode.PHONE_ALREADY_CONNECTED);
     }
   }
 
@@ -681,7 +791,19 @@ export class WhatsAppService {
     connectedAt: Date | null;
     createdAt: Date;
     updatedAt: Date;
+    connectionMetadata?: Prisma.JsonValue | null;
   }) {
+    const metadata =
+      account.connectionMetadata &&
+      typeof account.connectionMetadata === 'object' &&
+      !Array.isArray(account.connectionMetadata)
+        ? (account.connectionMetadata as Record<string, unknown>)
+        : {};
+    const customerChatUrl = this.toCustomerChatUrl(account.displayPhoneNumber);
+    const onboardingPath =
+      typeof metadata.onboardingPath === 'string' ? metadata.onboardingPath : null;
+    const isOnWhatsAppBusinessApp = metadata.isOnBizApp === true;
+
     return {
       displayPhoneNumber: account.displayPhoneNumber,
       phoneNumber: account.displayPhoneNumber,
@@ -696,7 +818,172 @@ export class WhatsAppService {
       lastCheckedAt: account.updatedAt,
       connectedAt: account.connectedAt,
       connected: account.status === WhatsAppConnectionStatus.CONNECTED,
+      customerChatUrl,
+      onboardingPath,
+      isOnWhatsAppBusinessApp,
     };
+  }
+
+  toCustomerChatUrl(phone?: string | null): string | null {
+    if (!phone) return null;
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 8) return null;
+    return `https://wa.me/${digits}`;
+  }
+
+  private mapMetaError(
+    error: unknown,
+    fallback: (typeof WhatsAppErrorCode)[keyof typeof WhatsAppErrorCode],
+  ) {
+    if (error instanceof HttpException) return error;
+    if (error instanceof MetaApiError) {
+      if (error.kind === 'timeout') {
+        return whatsappError(WhatsAppErrorCode.META_API_TIMEOUT);
+      }
+      if (error.kind === 'not_found') {
+        return whatsappError(
+          fallback === WhatsAppErrorCode.WABA_NOT_FOUND
+            ? WhatsAppErrorCode.WABA_NOT_FOUND
+            : WhatsAppErrorCode.PHONE_NUMBER_NOT_FOUND,
+        );
+      }
+      if (error.kind === 'auth') {
+        return whatsappError(WhatsAppErrorCode.INVALID_META_TOKEN);
+      }
+    }
+    return whatsappError(fallback);
+  }
+
+  private async resolveAuthorizedPhone(params: {
+    wabaId: string;
+    accessToken: string;
+    sessionPhoneNumberId?: string;
+  }) {
+    const phones = await this.meta.listWabaPhoneNumbers(
+      params.wabaId,
+      params.accessToken,
+    );
+    if (!phones.length) {
+      throw whatsappError(WhatsAppErrorCode.PHONE_NUMBER_NOT_FOUND);
+    }
+
+    if (params.sessionPhoneNumberId) {
+      const match = phones.find((phone) => phone.id === params.sessionPhoneNumberId);
+      if (!match) {
+        throw whatsappError(
+          WhatsAppErrorCode.UNSUPPORTED_NUMBER,
+          'The selected WhatsApp number does not belong to the authorized WhatsApp Business Account.',
+        );
+      }
+      return {
+        phoneNumberId: match.id,
+        displayPhoneNumber: match.displayPhoneNumber ?? null,
+      };
+    }
+
+    if (phones.length === 1) {
+      return {
+        phoneNumberId: phones[0].id,
+        displayPhoneNumber: phones[0].displayPhoneNumber ?? null,
+      };
+    }
+
+    throw whatsappError(
+      WhatsAppErrorCode.PHONE_NUMBER_NOT_FOUND,
+      'Multiple WhatsApp numbers were found. Complete Meta onboarding again and select one number.',
+    );
+  }
+
+  private async recordConnectionError(
+    businessId: string,
+    userId: string,
+    lastError: string,
+  ) {
+    const existing = await this.prisma.whatsAppAccount.findUnique({
+      where: { businessId },
+    });
+    if (!existing) return;
+    await this.prisma.whatsAppAccount.update({
+      where: { businessId },
+      data: {
+        status: WhatsAppConnectionStatus.ERROR,
+        lastError,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        businessId,
+        userId,
+        action: 'whatsapp.embedded_signup.failed',
+        entity: 'WhatsAppAccount',
+        entityId: existing.id,
+        metadata: { lastError },
+      },
+    }).catch(() => undefined);
+  }
+
+  private async persistErrorAccount(params: {
+    businessId: string;
+    userId: string;
+    phoneNumberId: string;
+    wabaId: string;
+    displayPhoneNumber: string | null;
+    accessToken: string;
+    tokenExpiresAt: Date | null;
+    onboardingPath: string;
+    lastError: string;
+    isOnBizApp?: boolean;
+    platformType?: string;
+    verifiedName?: string;
+  }) {
+    const encrypted = encryptSecret(
+      params.accessToken,
+      encryptionSecret(this.config),
+    );
+    try {
+      await this.assertPhoneNumberIdAvailable(
+        params.businessId,
+        params.phoneNumberId,
+      );
+    } catch {
+      await this.recordConnectionError(
+        params.businessId,
+        params.userId,
+        params.lastError,
+      );
+      return;
+    }
+
+    await this.prisma.whatsAppAccount.upsert({
+      where: { businessId: params.businessId },
+      create: {
+        businessId: params.businessId,
+        phoneNumberId: params.phoneNumberId,
+        wabaId: params.wabaId,
+        displayPhoneNumber: params.displayPhoneNumber,
+        accessTokenEncrypted: encrypted,
+        status: WhatsAppConnectionStatus.ERROR,
+        lastError: params.lastError,
+        connectedAt: null,
+        connectedByUserId: params.userId,
+        tokenExpiresAt: params.tokenExpiresAt,
+        connectionMetadata: {
+          onboardingPath: params.onboardingPath,
+          verifiedName: params.verifiedName ?? null,
+        } as Prisma.InputJsonValue,
+      },
+      update: {
+        phoneNumberId: params.phoneNumberId,
+        wabaId: params.wabaId,
+        displayPhoneNumber: params.displayPhoneNumber || undefined,
+        accessTokenEncrypted: encrypted,
+        status: WhatsAppConnectionStatus.ERROR,
+        lastError: params.lastError,
+        connectedAt: null,
+        connectedByUserId: params.userId,
+        tokenExpiresAt: params.tokenExpiresAt,
+      },
+    });
   }
 
   private async requireAccount(businessId: string) {

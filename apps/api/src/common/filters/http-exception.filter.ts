@@ -19,6 +19,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Something went wrong. Please try again.';
+    let code: string | undefined;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
@@ -26,8 +27,13 @@ export class HttpExceptionFilter implements ExceptionFilter {
       if (typeof body === 'string') {
         message = body;
       } else if (body && typeof body === 'object') {
-        const maybeMessage = (body as { message?: string | string[] }).message;
-        message = maybeMessage ?? exception.message;
+        const record = body as {
+          message?: string | string[];
+          code?: string;
+          error?: string;
+        };
+        message = record.message ?? exception.message;
+        if (typeof record.code === 'string') code = record.code;
       }
     } else if (exception instanceof Error) {
       this.logger.error(
@@ -40,6 +46,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       success: false,
       data: null,
       message: Array.isArray(message) ? message.join(', ') : message,
+      ...(code ? { code } : {}),
       statusCode: status,
       path: request.url,
       timestamp: new Date().toISOString(),

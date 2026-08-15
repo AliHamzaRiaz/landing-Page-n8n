@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { ConnectionCard } from '@/components/whatsapp/ConnectionCard'
+import { CustomerChatQr } from '@/components/whatsapp/CustomerChatQr'
 import { EmbeddedSignupButton } from '@/components/whatsapp/EmbeddedSignupButton'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
 import { ErrorState } from '@/components/ui/ErrorState'
 import { apiGet, apiPost, getFriendlyErrorMessage } from '@/lib/api'
+import { toWaMeUrl } from '@/lib/whatsapp-link'
 import type { WhatsAppStatus } from '@/types'
 
 export function WhatsAppPage() {
@@ -39,6 +41,8 @@ export function WhatsAppPage() {
   })
 
   const connected = statusQuery.data?.status === 'CONNECTED'
+  const phone = statusQuery.data?.phoneNumber || statusQuery.data?.displayPhoneNumber
+  const chatUrl = statusQuery.data?.customerChatUrl || toWaMeUrl(phone)
 
   return (
     <AppShell title="WhatsApp">
@@ -53,13 +57,19 @@ export function WhatsAppPage() {
             {!connected && !statusQuery.isLoading ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>Connect WhatsApp</CardTitle>
+                  <CardTitle>Connect your WhatsApp</CardTitle>
                   <CardDescription>
-                    Link your WhatsApp Business Account through Meta Embedded Signup. Each business
-                    uses its own phone number and credentials.
+                    Connect your WhatsApp Business account to start receiving and processing customer
+                    orders automatically.
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted">
+                    You’ll sign in with Meta. If the number already uses the WhatsApp Business app and
+                    is eligible for Coexistence, Meta will show its official QR for you to scan in
+                    the app. Otherwise Meta will verify the number with the standard Embedded Signup
+                    flow.
+                  </p>
                   <EmbeddedSignupButton
                     onConnected={() => {
                       setMessage('WhatsApp connected successfully.')
@@ -69,6 +79,10 @@ export function WhatsAppPage() {
                   />
                 </CardContent>
               </Card>
+            ) : null}
+
+            {connected && chatUrl ? (
+              <CustomerChatQr chatUrl={chatUrl} phone={phone} />
             ) : null}
 
             <ConnectionCard

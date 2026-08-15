@@ -95,7 +95,9 @@ export function getFriendlyErrorMessage(error: unknown, fallback = 'Something we
       }
       return 'Your session has expired. Please sign in again.'
     }
-    if (error.response.status === 403) return 'You do not have permission to perform this action.'
+    if (error.response.status === 403) {
+      return sanitizeMessage(String(raw), 'You do not have permission to perform this action.')
+    }
     if (error.response.status === 404) return 'The requested resource was not found.'
     if (error.response.status === 429) return 'Too many requests. Please wait a moment and try again.'
     if (error.response.status >= 500) return 'A server error occurred. Please try again shortly.'

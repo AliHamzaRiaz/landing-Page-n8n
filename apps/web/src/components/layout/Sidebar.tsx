@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, ShoppingBag, Settings, LogOut } from 'lucide-react'
+import { LayoutDashboard, ShoppingBag, Settings, LogOut, MessageCircle } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 
 const links = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, active: 'bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-400/30' },
   { to: '/orders', label: 'Orders', icon: ShoppingBag, active: 'bg-sky-500/20 text-sky-200 ring-1 ring-sky-400/30' },
+  { to: '/whatsapp', label: 'WhatsApp', icon: MessageCircle, active: 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-400/30' },
   { to: '/settings', label: 'Settings', icon: Settings, active: 'bg-violet-500/20 text-violet-200 ring-1 ring-violet-400/30' },
 ]
 
