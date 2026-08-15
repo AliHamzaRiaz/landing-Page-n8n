@@ -16,6 +16,8 @@ const columns = [
       { label: 'Login', href: '/login' },
       { label: 'Get Started', href: '/signup' },
       { label: 'Privacy Policy', href: '/privacy-policy' },
+      { label: 'Terms of Service', href: '/terms-of-service' },
+      { label: 'Data Deletion', href: '/data-deletion' },
     ],
   },
 ]
@@ -66,6 +68,14 @@ export function Footer() {
         © {new Date().getFullYear()} Ennitant. All rights reserved.{' '}
         <Link to="/privacy-policy" className="text-teal-100 underline-offset-2 hover:text-white hover:underline focus-ring rounded">
           Privacy Policy
+        </Link>
+        {' · '}
+        <Link to="/terms-of-service" className="text-teal-100 underline-offset-2 hover:text-white hover:underline focus-ring rounded">
+          Terms of Service
+        </Link>
+        {' · '}
+        <Link to="/data-deletion" className="text-teal-100 underline-offset-2 hover:text-white hover:underline focus-ring rounded">
+          Data Deletion
         </Link>
       </div>
     </footer>

@@ -21,6 +21,8 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { CustomerOrderPage } from '@/pages/CustomerOrderPage'
 import { VendorPortalPage } from '@/pages/VendorPortalPage'
 import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage'
+import { TermsOfServicePage } from '@/pages/TermsOfServicePage'
+import { DataDeletionPage } from '@/pages/DataDeletionPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -65,30 +67,14 @@ export default function App() {
 
             <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
             <Route path="/privacy" element={<Navigate to="/privacy-policy" replace />} />
-            <Route
-              path="/terms"
-              element={
-                <LegalPage
-                  title="Terms of Service"
-                  body="By using Ennitant you agree to use the platform for legitimate business messaging and order management in compliance with WhatsApp and Meta policies."
-                />
-              }
-            />
+            <Route path="/terms-of-service" element={<TermsOfServicePage />} />
+            <Route path="/terms" element={<Navigate to="/terms-of-service" replace />} />
+            <Route path="/data-deletion" element={<DataDeletionPage />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>
-  )
-}
-
-function LegalPage({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="mx-auto max-w-2xl px-6 py-16">
-      <p className="font-display text-2xl font-semibold text-brand">Ennitant</p>
-      <h1 className="mt-6 text-3xl font-semibold text-ink">{title}</h1>
-      <p className="mt-4 text-muted leading-relaxed">{body}</p>
-    </div>
   )
 }
