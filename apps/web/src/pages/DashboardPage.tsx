@@ -66,6 +66,21 @@ export function DashboardPage() {
     refetchInterval: 8000,
   })
 
+  const campaignStats = useQuery({
+    queryKey: ['campaign-analytics'],
+    queryFn: () =>
+      apiGet<{
+        totals: {
+          campaigns: number
+          activeCampaigns: number
+          scheduledPosts: number
+          publishedPosts: number
+          failedPosts: number
+          connectedAccounts: number
+        }
+      }>('/analytics'),
+  })
+
   useEffect(() => {
     if (typeof data?.newOrders !== 'number') return
     const previous = previousNewOrders.current
@@ -247,6 +262,39 @@ export function DashboardPage() {
                 </div>
               </article>
             </div>
+
+            {campaignStats.data?.totals ? (
+              <section aria-labelledby="campaign-overview-heading" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 id="campaign-overview-heading" className="text-lg font-bold text-ink">
+                    Campaigns
+                  </h2>
+                  <Link
+                    to="/campaigns"
+                    className="rounded-xl bg-fuchsia-50 px-3 py-1.5 text-sm font-semibold text-fuchsia-700 transition hover:bg-fuchsia-100"
+                  >
+                    Open
+                  </Link>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                  {(
+                    [
+                      ['Total', campaignStats.data.totals.campaigns],
+                      ['Active', campaignStats.data.totals.activeCampaigns],
+                      ['Scheduled', campaignStats.data.totals.scheduledPosts],
+                      ['Published', campaignStats.data.totals.publishedPosts],
+                      ['Failed', campaignStats.data.totals.failedPosts],
+                      ['Accounts', campaignStats.data.totals.connectedAccounts],
+                    ] as const
+                  ).map(([label, value]) => (
+                    <div key={label} className="app-panel rounded-2xl p-4">
+                      <p className="text-xs text-muted">{label}</p>
+                      <p className="mt-1 text-xl font-bold text-ink">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             <section aria-labelledby="recent-orders-heading" className="space-y-3">
               <div className="flex items-center justify-between gap-3">

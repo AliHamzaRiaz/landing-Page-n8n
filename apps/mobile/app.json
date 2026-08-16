@@ -1,0 +1,28 @@
+{
+  "expo": {
+    "name": "Ennitant",
+    "slug": "ennitant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "ennitant",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ennitant.app"
+    },
+    "android": {
+      "package": "com.ennitant.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#073b4c"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [],
+    "extra": {
+      "apiUrl": "http://localhost:3001/api"
+    }
+  }
+}

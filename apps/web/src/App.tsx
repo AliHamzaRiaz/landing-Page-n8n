@@ -23,6 +23,13 @@ import { VendorPortalPage } from '@/pages/VendorPortalPage'
 import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage'
 import { TermsOfServicePage } from '@/pages/TermsOfServicePage'
 import { DataDeletionPage } from '@/pages/DataDeletionPage'
+import { CampaignsPage } from '@/pages/CampaignsPage'
+import { CampaignWizardPage } from '@/pages/CampaignWizardPage'
+import { CampaignDetailPage } from '@/pages/CampaignDetailPage'
+import { SocialAccountsPage } from '@/pages/SocialAccountsPage'
+import { AnalyticsPage } from '@/pages/AnalyticsPage'
+import { MediaLibraryPage } from '@/pages/MediaLibraryPage'
+import { ScheduledPostsPage } from '@/pages/ScheduledPostsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -62,6 +69,13 @@ export default function App() {
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/customers/:id" element={<CustomerDetailPage />} />
               <Route path="/whatsapp" element={<WhatsAppPage />} />
+              <Route path="/campaigns" element={<CampaignsPage />} />
+              <Route path="/campaigns/new" element={<CampaignWizardPage />} />
+              <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
+              <Route path="/media" element={<MediaLibraryPage />} />
+              <Route path="/scheduled" element={<ScheduledPostsPage />} />
+              <Route path="/social-accounts" element={<SocialAccountsPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
 

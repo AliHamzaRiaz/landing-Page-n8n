@@ -83,6 +83,7 @@ npm run dev
 
 - Frontend: http://localhost:5173  
 - API: http://localhost:3001/api/health  
+- Mobile (Expo): `npm run dev:mobile` — see [docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md)
 
 ### Demo account (seed)
 
@@ -166,6 +167,20 @@ Every business-scoped query filters by the authenticated user’s `businessId` f
 4. Meta webhook → Ennitant API → n8n processing  
 5. Order saved → customer confirmation → owner notification  
 6. Owner manages the order in the dashboard  
+
+## Campaigns (added)
+
+Web: `/campaigns`, `/social-accounts`, `/analytics`. Same JWT API as orders.
+
+Docs:
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/API.md](docs/API.md)
+- [docs/ENVIRONMENT.md](docs/ENVIRONMENT.md)
+- [docs/MOBILE_SETUP.md](docs/MOBILE_SETUP.md)
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+
+Mobile sources: `apps/mobile`. Do not put secrets in Expo.
 
 ## Testing
 

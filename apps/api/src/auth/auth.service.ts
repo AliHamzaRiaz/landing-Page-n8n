@@ -9,13 +9,15 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomBytes, randomInt } from 'crypto';
 import { OtpService } from '../otp/otp.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtPayload } from './types/jwt-payload.type';
 
 @Injectable()
@@ -248,6 +250,57 @@ export class AuthService {
         business: this.sanitizeBusiness(user.business),
       },
     };
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto) {
+    const generic = {
+      message: 'If that email is registered, reset instructions are on the way.',
+      data: null,
+    };
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email }, { business: { email } }],
+      },
+    });
+    if (!user) return generic;
+
+    const token = randomBytes(32).toString('hex');
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetTokenHash: this.hashToken(token),
+        resetTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+
+    const frontend = (this.config.get<string>('FRONTEND_URL') || 'http://localhost:5173').replace(
+      /\/+$/,
+      '',
+    );
+    if (this.config.get('OTP_DEV_MODE') === 'true') {
+      this.logger.log(`Password reset link: ${frontend}/reset-password?token=${token}`);
+    }
+    return generic;
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const hash = this.hashToken(dto.token);
+    const user = await this.prisma.user.findFirst({
+      where: { resetTokenHash: hash, resetTokenExpiresAt: { gt: new Date() } },
+    });
+    if (!user) {
+      throw new BadRequestException('Reset token is invalid or expired.');
+    }
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: await argon2.hash(dto.password),
+        resetTokenHash: null,
+        resetTokenExpiresAt: null,
+      },
+    });
+    return { message: 'Password updated', data: null };
   }
 
   private async issueOtp(userId: string, phoneNumber: string) {

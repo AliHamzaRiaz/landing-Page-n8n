@@ -145,6 +145,25 @@ export async function apiDelete<T>(url: string): Promise<T> {
   return unwrap(data)
 }
 
+export async function apiUpload<T>(url: string, file: File, campaignId?: string): Promise<T> {
+  const body = new FormData()
+  body.append('file', file)
+  const { data } = await api.post<ApiEnvelope<T> | T>(url, body, {
+    timeout: 120_000,
+    params: campaignId ? { campaignId } : undefined,
+    transformRequest: [
+      (formData, headers) => {
+        if (headers) {
+          delete headers['Content-Type']
+          delete headers['content-type']
+        }
+        return formData
+      },
+    ],
+  })
+  return unwrap(data)
+}
+
 function unwrap<T>(payload: ApiEnvelope<T> | T): T {
   if (payload && typeof payload === 'object' && 'data' in payload && 'success' in payload) {
     return (payload as ApiEnvelope<T>).data

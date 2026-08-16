@@ -13,6 +13,7 @@ describe('AuthService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -62,6 +63,7 @@ describe('AuthService', () => {
       fn({
         user: {
           findUnique: jest.fn(),
+          findFirst: jest.fn(),
           update: jest.fn(),
           create: jest.fn().mockResolvedValue({
             id: 'u1',
@@ -159,5 +161,12 @@ describe('AuthService', () => {
       password: 'Demo1234!',
     });
     expect(result.data.accessToken).toBe('test-token');
+  });
+
+  it('forgot-password does not reveal whether the email exists', async () => {
+    prisma.user.findFirst.mockResolvedValue(null);
+    const result = await service.forgotPassword({ email: 'nobody@example.com' });
+    expect(result.message).toMatch(/reset instructions/i);
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 });

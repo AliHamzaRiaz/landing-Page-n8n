@@ -20,6 +20,12 @@ import { UsersModule } from './users/users.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { PublicModule } from './public/public.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
+import { MediaModule } from './media/media.module';
+import { SocialAccountsModule } from './social/social-accounts.module';
+import { PublishingModule } from './publishing/publishing.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { AiModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -51,6 +57,12 @@ import { PublicModule } from './public/public.module';
     NotificationsModule,
     IntegrationsModule,
     PublicModule,
+    AiModule,
+    MediaModule,
+    CampaignsModule,
+    SocialAccountsModule,
+    PublishingModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -11,6 +11,7 @@
     "dev": "turbo run dev",
     "dev:api": "npm run dev:ts --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
+    "dev:mobile": "npm run start --workspace=mobile",
     "dev:all": "npm run dev:api & npm run dev:web",
     "build": "turbo run build",
     "start": "turbo run start",
